@@ -1,0 +1,2586 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>플로우 필드 길찾기 실험실</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Orbit&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* 모눈종이 실험 노트: 차가운 종이와 잉크만 쓰고, 색은 두 방식(A* 파랑, 플로우 필드 주황)과
+     형광펜(살펴본 횟수)에만 준다. 한 화면에 질문 하나, 지도가 주인공. */
+  --paper: #eef2f4;
+  --sheet: #fbfcfd;
+  --ground: #fbfcfd;
+  --wall: #33434f;
+  --ink: #0f1e28;
+  --ink-2: #44596a;
+  --muted: #647884;
+  --rule: #dbe3e8;
+  --axis: #b7c4cc;
+  --grid-line: rgba(15, 30, 40, 0.055);
+  --astar: #2a78d6;
+  --flow: #eb6834;
+  --heat-1: #fdf1c2;
+  --heat-2: #f7cf5a;
+  --heat-3: #dd9a08;
+  --heat-4: #96600a;
+  --focus: #0b5fc4;
+  --shadow: 0 1px 2px rgba(15, 30, 40, 0.06), 0 6px 18px rgba(15, 30, 40, 0.05);
+  --font-display: "Orbit", "IBM Plex Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-body: "IBM Plex Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0b1014;
+    --sheet: #131a1f;
+    --ground: #182128;
+    --wall: #05080a;
+    --ink: #e6edf1;
+    --ink-2: #b3c2cc;
+    --muted: #8a9da9;
+    --rule: #242f37;
+    --axis: #3a4852;
+    --grid-line: rgba(230, 237, 241, 0.04);
+    --astar: #3987e5;
+    --flow: #d95926;
+    --heat-1: #3a2e10;
+    --heat-2: #6f5512;
+    --heat-3: #bd8d14;
+    --heat-4: #f6d24a;
+    --focus: #8fbfff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.25);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0b1014;
+  --sheet: #131a1f;
+  --ground: #182128;
+  --wall: #05080a;
+  --ink: #e6edf1;
+  --ink-2: #b3c2cc;
+  --muted: #8a9da9;
+  --rule: #242f37;
+  --axis: #3a4852;
+  --grid-line: rgba(230, 237, 241, 0.04);
+  --astar: #3987e5;
+  --flow: #d95926;
+  --heat-1: #3a2e10;
+  --heat-2: #6f5512;
+  --heat-3: #bd8d14;
+  --heat-4: #f6d24a;
+  --focus: #8fbfff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.25);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background-color: var(--paper);
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 20px 20px;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+h1, h2, h3, p, dl, dd, ul, ol, figure { margin: 0; }
+h1, h2, h3 { text-wrap: balance; font-weight: 400; }
+button, input { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+
+.lab {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px 20px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ---------- 맨 위: 이름, 전체 설정 ---------- */
+.topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 24px; }
+.brand { font-family: var(--font-display); font-size: 19px; letter-spacing: -0.01em; }
+.globals { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; font-size: 13px; color: var(--ink-2); }
+.mapno { display: inline-flex; align-items: center; gap: 6px; }
+.mapno input {
+  width: 64px; padding: 3px 7px; border: 1px solid var(--axis); border-radius: 5px;
+  background: var(--sheet); font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; color: var(--ink);
+}
+
+.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--ink-2); }
+.switch input {
+  appearance: none; -webkit-appearance: none; margin: 0; flex: none;
+  width: 34px; height: 20px; border-radius: 10px; background: var(--axis); position: relative; cursor: pointer;
+  transition: background 0.15s;
+}
+.switch input::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--sheet); transition: transform 0.15s;
+}
+.switch input:checked { background: var(--ink); }
+.switch input:checked::after { transform: translateX(14px); }
+.switch b { font-weight: 600; color: var(--ink); min-width: 1.2em; }
+
+/* ---------- 단계 표시 ---------- */
+.stepnav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.stepnav__group { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.stepnav__label {
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-2);
+  padding-bottom: 3px; border-bottom: 2px solid var(--ink);
+}
+.stepnav__group--astar .stepnav__label { border-bottom-color: var(--astar); }
+.stepnav__group--flow .stepnav__label { border-bottom-color: var(--flow); }
+.stepnav__btns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.stepbtn {
+  display: flex; align-items: baseline; gap: 7px; min-width: 0; text-align: left;
+  padding: 6px 10px; border: 1px solid var(--rule); border-radius: 5px; background: var(--sheet);
+  font-size: 13px; line-height: 1.45; color: var(--ink-2); cursor: pointer;
+}
+.stepbtn b { font-family: var(--font-mono); font-weight: 500; color: var(--ink); }
+.stepbtn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stepbtn:hover { border-color: var(--ink-2); color: var(--ink); }
+.stepbtn[aria-current="step"] { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+.stepbtn[aria-current="step"] b { color: var(--sheet); }
+@media (max-width: 720px) {
+  .stepbtn { justify-content: center; }
+  .stepbtn span { display: none; }
+}
+
+/* ---------- 단계 공통 ---------- */
+.step { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.step__head { display: flex; flex-direction: column; gap: 6px; }
+.kicker { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.03em; color: var(--muted); }
+h1 { font-family: var(--font-display); font-size: clamp(25px, 3.4vw, 36px); line-height: 1.18; letter-spacing: -0.015em; }
+.say { color: var(--ink-2); font-size: 15px; max-width: 36em; }
+.say b { color: var(--ink); font-weight: 600; }
+.say--wide { max-width: 46em; }
+
+.btn {
+  padding: 6px 13px; border: 1px solid var(--axis); border-radius: 5px; background: var(--sheet);
+  font-size: 13.5px; font-weight: 500; line-height: 1.5; cursor: pointer; white-space: nowrap;
+}
+.btn:hover { border-color: var(--ink-2); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn--small { padding: 3px 9px; font-size: 12.5px; }
+.btn--primary { background: var(--ink); border-color: var(--ink); color: var(--sheet); padding: 8px 22px; font-size: 15px; font-weight: 600; min-width: 92px; }
+.btn--primary:hover { opacity: 0.9; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.seg { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.seg legend { padding: 0; font-size: 12.5px; font-weight: 500; color: var(--ink-2); }
+.seg__opts { display: inline-flex; flex-wrap: wrap; align-self: flex-start; border: 1px solid var(--axis); border-radius: 5px; overflow: hidden; background: var(--sheet); }
+.seg__opts label { position: relative; display: block; }
+.seg__opts input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.seg__opts span {
+  display: block; padding: 5px 10px; min-width: 36px; text-align: center;
+  font-family: var(--font-mono); font-size: 13px; font-weight: 500; line-height: 1.5;
+  color: var(--ink-2); border-right: 1px solid var(--rule); white-space: nowrap;
+}
+.seg__opts label:last-child span { border-right: 0; }
+.seg__opts label:hover span { color: var(--ink); background: var(--paper); }
+.seg__opts input:checked + span { background: var(--ink); color: var(--sheet); }
+.seg__opts input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: -2px; }
+.seg--text .seg__opts span { font-family: var(--font-body); }
+.ctrl { display: flex; flex-direction: column; gap: 12px; }
+.ctrl--row { flex-direction: row; flex-wrap: wrap; align-items: flex-end; gap: 12px 22px; }
+.ctrl__pair { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 22px; }
+.ctrl .switch { padding-bottom: 5px; }
+
+/* ---------- 지도 한 장 + 옆 설명 (1, 2, 4단계) ---------- */
+.solo { display: grid; grid-template-columns: minmax(0, 1.85fr) minmax(280px, 1fr); gap: 22px; align-items: start; }
+@media (max-width: 900px) { .solo { grid-template-columns: minmax(0, 1fr); } }
+.side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.mapbox {
+  position: relative; min-width: 0; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden;
+  background: var(--ground); box-shadow: var(--shadow);
+}
+.mapbox canvas { display: block; width: 100%; aspect-ratio: 8 / 5; }
+.mapbox--zoom canvas { aspect-ratio: 1 / 1; }
+.map__status {
+  position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; border-radius: 3px;
+  background: var(--ink); color: var(--sheet); font-size: 12px; font-weight: 500;
+}
+.map__status:empty { display: none; }
+
+.readout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); }
+.readout > div { padding: 9px 12px 10px; min-width: 0; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.readout > div:nth-child(2n) { border-right: 0; }
+.readout > div:nth-last-child(-n+2) { border-bottom: 0; }
+.readout dt { font-size: 12px; color: var(--ink-2); }
+.readout dd { font-size: 19px; font-weight: 600; line-height: 1.3; white-space: nowrap; }
+.readout dd small { font-size: 12px; font-weight: 500; color: var(--ink-2); margin-left: 3px; }
+.readout--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); border: 0; border-radius: 0; }
+.readout--3 > div { border-bottom: 0; }
+.readout--3 > div:nth-child(2n) { border-right: 1px solid var(--rule); }
+.readout--3 > div:last-child { border-right: 0; }
+.result { font-size: 14.5px; font-weight: 500; min-height: 1.6em; max-width: 46em; }
+.result:empty { display: none; }
+
+.keys { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; font-size: 12.5px; color: var(--ink-2); }
+.keys > span { display: inline-flex; align-items: center; gap: 7px; }
+.keys__ramp { width: 96px; height: 10px; border-radius: 2px; border: 1px solid var(--rule);
+  background: linear-gradient(90deg, var(--heat-1), var(--heat-2), var(--heat-3), var(--heat-4)); }
+.is-game .keys__ramp { background: linear-gradient(90deg, #fdf1c2, #f7cf5a, #dd9a08, #96600a); }
+.keys__tint { width: 14px; height: 12px; border-radius: 2px; border: 1px solid var(--rule); background: var(--heat-2); }
+.is-game .keys__tint { background: #f7cf5a; }
+.keys__tint--pale { background: var(--heat-1); }
+.is-game .keys__tint--pale { background: #fdf1c2; }
+.keys__line { width: 18px; height: 0; border-top: 3px solid var(--astar); }
+.keys__arrow { font-family: var(--font-mono); font-size: 14px; line-height: 1; color: var(--ink); }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+.dot--astar { background: var(--astar); }
+.dot--flow { background: var(--flow); }
+.is-game .dot--astar { background: #2a78d6; outline: 1.5px solid #16202a; }
+.is-game .dot--flow { background: #eb6834; outline: 1.5px solid #16202a; }
+
+/* ---------- 3단계 ---------- */
+.field3 { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 760px) { .field3 { grid-template-columns: minmax(0, 1fr); } }
+.mapfig { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.mapfig figcaption { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 26px; font-size: 13px; color: var(--ink-2); }
+.mapfig figcaption b { font-weight: 600; color: var(--ink); }
+#cv3 { cursor: crosshair; touch-action: none; }
+.f3controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 22px; }
+.f3bar { flex: 1 1 220px; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; font-weight: 500; color: var(--ink-2); min-width: 0; }
+.f3bar input { width: 100%; margin: 0; height: 30px; accent-color: var(--ink); }
+.f3lower { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+@media (max-width: 760px) { .f3lower { grid-template-columns: minmax(0, 1fr); } }
+.f3left { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.scenes { list-style: none; padding: 0; counter-reset: scene; display: flex; flex-direction: column; gap: 4px; }
+.scenes li {
+  counter-increment: scene; display: flex; gap: 10px; align-items: baseline;
+  padding: 5px 10px; border-left: 3px solid var(--rule); color: var(--muted); font-size: 14px;
+}
+.scenes li::before { content: counter(scene); font-family: var(--font-mono); font-size: 12.5px; }
+.scenes li.is-on { border-left-color: var(--flow); color: var(--ink); font-weight: 500; background: var(--sheet); }
+.scenes li.is-done { color: var(--ink-2); border-left-color: var(--axis); }
+.root2 { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.root2 h2 { font-family: var(--font-display); font-size: 17px; line-height: 1.35; }
+.root2 p { font-size: 14px; color: var(--ink-2); }
+.root2 p b { color: var(--ink); font-weight: 600; }
+.root2 .fine { font-size: 12.5px; color: var(--muted); }
+.root2__figs { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; }
+.root2__figs svg { width: 136px; height: auto; flex: none; }
+.root2 svg text { font-family: var(--font-mono); font-size: 13px; fill: var(--ink-2); }
+.root2 svg .r2-strong { fill: var(--ink); font-weight: 500; }
+.r2-box { fill: none; stroke: var(--ink-2); stroke-width: 1.5; }
+.r2-diag { stroke: var(--flow); stroke-width: 2.5; stroke-linecap: round; }
+.r2-grid rect { fill: none; stroke: var(--ink-2); stroke-width: 1.5; }
+.r2-grid line { stroke: var(--axis); stroke-width: 1; }
+.r2-cell--zero { fill: var(--heat-2); }
+
+/* ---------- 5단계 ---------- */
+.dualbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 24px; }
+.panes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+@media (max-width: 820px) { .panes { grid-template-columns: minmax(0, 1fr); } }
+.pane { min-width: 0; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; box-shadow: var(--shadow); display: flex; flex-direction: column; }
+.pane__head { padding: 9px 14px 8px; border-top: 3px solid var(--astar); border-radius: 3px 3px 0 0; }
+.pane--flow .pane__head { border-top-color: var(--flow); }
+.pane h2 { font-family: var(--font-display); font-size: 16.5px; line-height: 1.35; }
+.map { position: relative; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); background: var(--ground); }
+.map canvas { display: block; width: 100%; aspect-ratio: 8 / 5; }
+
+/* ---------- 6단계 ---------- */
+.panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; box-shadow: var(--shadow); padding: 16px 22px 22px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.tabs { display: flex; flex-wrap: wrap; gap: 0; border-bottom: 1px solid var(--axis); }
+.tab { padding: 8px 14px; border: 0; border-bottom: 3px solid transparent; margin-bottom: -1px; background: none; font-size: 14px; font-weight: 500; color: var(--ink-2); cursor: pointer; }
+.tab:hover { color: var(--ink); }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
+.exp { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.exp__spec { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 14px; font-size: 14px; }
+.exp__spec dt { color: var(--ink-2); font-size: 12.5px; padding-top: 2px; }
+.exp__run { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.exp__status { font-size: 13px; color: var(--ink-2); }
+.exp__summary { font-size: 15px; font-weight: 500; max-width: 46em; }
+.exp__empty { color: var(--ink-2); font-size: 14px; padding: 18px 0; }
+.check { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; color: var(--ink-2); cursor: pointer; }
+.check input { width: 16px; height: 16px; margin: 0; accent-color: var(--ink); }
+.charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+.chart { position: relative; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.chart__title { font-size: 14px; font-weight: 600; }
+.chart__legend { display: flex; gap: 14px; font-size: 12.5px; color: var(--ink-2); }
+.chart__legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart__legend i { width: 16px; height: 0; border-top: 2px solid; display: inline-block; }
+.k-astar { border-color: var(--astar); color: var(--astar); }
+.k-flow { border-color: var(--flow); color: var(--flow); }
+.chart svg { display: block; width: 100%; max-width: 600px; height: auto; overflow: visible; }
+.chart svg:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+.chart text { font-family: var(--font-body); font-size: 11.5px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.chart .c-grid { stroke: var(--rule); stroke-width: 1; }
+.chart .c-axis { stroke: var(--axis); stroke-width: 1; }
+.chart .c-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .c-astar { stroke: var(--astar); }
+.chart .c-flow { stroke: var(--flow); }
+.chart .c-dot { stroke: var(--sheet); stroke-width: 2; }
+.chart .c-dot.c-astar { fill: var(--astar); stroke: var(--sheet); }
+.chart .c-dot.c-flow { fill: var(--flow); stroke: var(--sheet); }
+.chart .c-end { fill: var(--ink-2); font-size: 12px; font-weight: 500; }
+.chart .c-cross { stroke: var(--ink-2); stroke-width: 1; opacity: 0; }
+.chart .c-xlabel { fill: var(--ink-2); }
+.tip {
+  position: absolute; z-index: 2; pointer-events: none; min-width: 132px;
+  background: var(--sheet); border: 1px solid var(--axis); border-radius: 4px; box-shadow: var(--shadow);
+  padding: 7px 10px; font-size: 12.5px; line-height: 1.5; opacity: 0; transition: opacity 0.08s;
+}
+.tip__x { color: var(--ink-2); font-size: 12px; }
+.tip__row { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.tip__row i { width: 12px; height: 0; border-top: 2px solid; }
+.tip__row b { font-weight: 600; color: var(--ink); }
+.tip__row span { color: var(--ink-2); }
+.tablewrap { overflow-x: auto; border-top: 1px solid var(--rule); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+th, td { padding: 7px 12px; border-bottom: 1px solid var(--rule); text-align: right; white-space: nowrap; }
+th { font-weight: 500; color: var(--ink-2); font-size: 12.5px; }
+th:first-child, td:first-child { text-align: left; }
+.copybox { width: 100%; min-height: 120px; font-family: var(--font-mono); font-size: 12px; border: 1px solid var(--axis); border-radius: 4px; background: var(--paper); color: var(--ink); padding: 8px; }
+.notes { border-top: 1px solid var(--axis); padding-top: 10px; }
+.notes summary { cursor: pointer; font-size: 14px; font-weight: 500; color: var(--ink-2); padding: 4px 0; }
+.notes ul { margin-top: 8px; padding-left: 1.15em; display: flex; flex-direction: column; gap: 6px; max-width: 50em; color: var(--ink-2); font-size: 14px; }
+.notes li b { color: var(--ink); font-weight: 600; }
+
+/* ---------- 이전 / 다음 ---------- */
+.pager { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--axis); padding-top: 14px; }
+.pager__btn { display: inline-flex; align-items: baseline; gap: 8px; padding: 8px 14px; min-width: 0; white-space: normal; text-align: left; }
+.pager__btn small { font-family: var(--font-mono); font-size: 12px; color: var(--muted); white-space: nowrap; flex: none; }
+.pager__btn span:first-child, .pager__btn span:last-child { flex: none; }
+.pager__btn--next { margin-left: auto; background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+.pager__btn--next small { color: var(--sheet); opacity: 0.75; }
+.pager__btn--next:hover { opacity: 0.9; }
+
+@media (prefers-reduced-motion: reduce) { .tip, .switch input, .switch input::after { transition: none; } }
+</style>
+</head>
+<body>
+<main class="lab">
+
+  <header class="topbar">
+    <p class="brand">플로우 필드 길찾기 실험실</p>
+    <div class="globals">
+      <label class="switch" for="gameSkin"><input type="checkbox" id="gameSkin" role="switch" checked><span>게임 화면</span></label>
+      <div class="mapno">
+        <label for="seed">맵 번호</label>
+        <input id="seed" type="number" min="1" max="9999" step="1" value="7" inputmode="numeric">
+        <button class="btn btn--small" id="newMap" type="button">다른 맵</button>
+      </div>
+    </div>
+  </header>
+
+  <nav class="stepnav" aria-label="단계" id="stepnav"></nav>
+
+  <!-- ================= 1단계 ================= -->
+  <section class="step" id="step1" aria-labelledby="q1">
+    <div class="step__head">
+      <p class="kicker">1단계 · A*</p>
+      <h1 id="q1">유닛 하나는 길을 어떻게 찾을까?</h1>
+    </div>
+    <div class="solo">
+      <div class="mapbox"><canvas id="cv1" role="img" aria-label="유닛 하나가 A*로 길을 찾는 지도"></canvas><p class="map__status" id="st1"></p></div>
+      <div class="side">
+        <p class="say">A*는 출발점에서 시작해, 목적지에 가까워 보이는 칸부터 하나씩 꺼내 확인해요. 목적지에 닿으면 지나온 칸을 거슬러 올라가 길을 만들어요. 색이 칠해지는 칸이 길을 찾는 동안 <b>살펴본 칸</b>이에요.</p>
+        <div class="actions">
+          <button class="btn btn--primary" id="go1" type="button">출발</button>
+          <button class="btn" id="reset1" type="button">처음으로</button>
+        </div>
+        <dl class="readout">
+          <div><dt>살펴본 칸</dt><dd id="cells1">–</dd></div>
+          <div><dt>찾은 길의 길이</dt><dd id="len1">–</dd></div>
+        </dl>
+        <p class="result" id="res1"></p>
+        <div class="keys" id="keys1"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 2단계 ================= -->
+  <section class="step" id="step2" aria-labelledby="q2" hidden>
+    <div class="step__head">
+      <p class="kicker">2단계 · A*</p>
+      <h1 id="q2">A*에서 유닛이 많아지면?</h1>
+    </div>
+    <div class="solo">
+      <div class="mapbox"><canvas id="cv2" role="img" aria-label="여러 유닛이 A*로 각자 길을 찾는 지도"></canvas><p class="map__status" id="st2"></p></div>
+      <div class="side">
+        <p class="say"><b>A*는 유닛을 기준으로 세요.</b> 유닛마다 길을 따로 찾기 때문에, 살펴본 칸은 유닛 수만큼 늘어나요. 같은 칸을 여러 번 살펴볼수록 색이 진해져요.</p>
+        <div class="ctrl" id="ctrl2"></div>
+        <div class="actions">
+          <button class="btn btn--primary" id="go2" type="button">출발</button>
+          <button class="btn" id="reset2" type="button">처음으로</button>
+        </div>
+        <dl class="readout">
+          <div><dt>출발할 때 살펴본 칸</dt><dd id="cells2">–</dd></div>
+          <div><dt>이동 중에 더 살펴본 칸</dt><dd id="extra2">–</dd></div>
+          <div><dt>한 칸을 가장 많이 본 횟수</dt><dd id="max2">–</dd></div>
+          <div><dt>도착</dt><dd id="arr2">–</dd></div>
+        </dl>
+        <p class="result" id="res2"></p>
+        <div class="keys" id="keys2"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 3단계 ================= -->
+  <section class="step" id="step3" aria-labelledby="q3" hidden>
+    <div class="step__head">
+      <p class="kicker">3단계 · 플로우 필드</p>
+      <h1 id="q3">지도 한 장을 같이 쓰면?</h1>
+      <p class="say say--wide">플로우 필드는 유닛이 아니라 목적지에서 시작해요. 지도 전체에 목적지까지의 거리를 한 번 적어 두고, 모든 유닛이 그 지도를 함께 써요.</p>
+    </div>
+    <div class="field3">
+      <figure class="mapfig">
+        <figcaption><b>지도 전체</b><span>지도를 누르면 그곳을 확대해요</span></figcaption>
+        <div class="mapbox"><canvas id="cv3" role="img" aria-label="목적지에서 숫자가 퍼져 나가는 지도 전체"></canvas></div>
+      </figure>
+      <figure class="mapfig">
+        <figcaption><b>확대해서 보기</b><button class="btn btn--small" id="follow3" type="button" hidden>앞머리 따라가기</button></figcaption>
+        <div class="mapbox mapbox--zoom"><canvas id="cv3z" role="img" aria-label="지금 숫자가 적히는 곳을 확대한 그림"></canvas></div>
+      </figure>
+    </div>
+    <div class="f3controls">
+      <div class="actions">
+        <button class="btn btn--primary" id="play3" type="button">재생</button>
+        <button class="btn" id="ring3" type="button">한 겹 더</button>
+        <button class="btn" id="reset3" type="button">처음으로</button>
+      </div>
+      <div id="pace3"></div>
+      <label class="f3bar" for="bar3"><span>진행</span><input type="range" id="bar3" min="0" max="1000" step="1" value="0"></label>
+    </div>
+    <div class="f3lower">
+      <div class="f3left">
+        <ol class="scenes" id="scenes3">
+          <li>목적지 칸에 0을 적는다.</li>
+          <li>숫자가 바깥으로 한 겹씩 퍼진다. 옆 칸은 +1, 대각선 칸은 +1.4.</li>
+          <li>칸마다 숫자가 가장 작은 이웃 쪽으로 화살표를 그린다.</li>
+          <li>유닛이 화살표만 따라 목적지로 간다.</li>
+        </ol>
+        <dl class="readout">
+          <div><dt>숫자를 매긴 칸</dt><dd id="num3">–</dd></div>
+          <div><dt>가장 바깥 숫자</dt><dd id="far3">–</dd></div>
+        </dl>
+        <p class="result" id="res3"></p>
+      </div>
+      <aside class="root2" aria-labelledby="root2t">
+        <h2 id="root2t">대각선은 왜 1.4일까?</h2>
+        <div class="root2__figs">
+          <svg viewBox="0 0 150 132" role="img" aria-label="한 변이 1인 정사각형의 대각선은 루트 2">
+            <rect class="r2-box" x="24" y="14" width="92" height="92"/>
+            <line class="r2-diag" x1="24" y1="106" x2="116" y2="14"/>
+            <text x="70" y="124" text-anchor="middle">1</text>
+            <text x="128" y="64" text-anchor="middle">1</text>
+            <text class="r2-strong" text-anchor="middle" transform="translate(62 52) rotate(-45)">√2 ≈ 1.41</text>
+          </svg>
+          <svg viewBox="0 0 132 132" role="img" aria-label="가운데 0, 옆 칸 1, 대각선 칸 1.4">
+            <rect class="r2-cell r2-cell--zero" x="48" y="48" width="36" height="36"/>
+            <g class="r2-grid">
+              <rect x="12" y="12" width="108" height="108"/>
+              <line x1="48" y1="12" x2="48" y2="120"/><line x1="84" y1="12" x2="84" y2="120"/>
+              <line x1="12" y1="48" x2="120" y2="48"/><line x1="12" y1="84" x2="120" y2="84"/>
+            </g>
+            <g text-anchor="middle">
+              <text x="30" y="35">1.4</text><text x="66" y="35">1</text><text x="102" y="35">1.4</text>
+              <text x="30" y="71">1</text><text class="r2-strong" x="66" y="71">0</text><text x="102" y="71">1</text>
+              <text x="30" y="107">1.4</text><text x="66" y="107">1</text><text x="102" y="107">1.4</text>
+            </g>
+          </svg>
+        </div>
+        <p>옆 칸까지는 1칸이고, 대각선 칸까지는 √2칸이에요. <b>√2는 약 1.41이라서 대각선으로 한 칸 갈 때는 1.4를 더해요.</b></p>
+        <p class="fine">프로그램은 정수로 계산하려고 직선을 10, 대각선을 14로 써요. 1.41 대신 1.4를 쓰는 셈이라 실제 거리와 1% 정도 차이가 나요.</p>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ================= 4단계 ================= -->
+  <section class="step" id="step4" aria-labelledby="q4" hidden>
+    <div class="step__head">
+      <p class="kicker">4단계 · 플로우 필드</p>
+      <h1 id="q4">플로우 필드에서 유닛이 많아지면?</h1>
+    </div>
+    <div class="solo">
+      <div class="mapbox"><canvas id="cv4" role="img" aria-label="여러 유닛이 플로우 필드의 화살표를 따라가는 지도"></canvas><p class="map__status" id="st4"></p></div>
+      <div class="side">
+        <p class="say"><b>플로우 필드는 유닛이 아니라 지도를 기준으로 세요.</b> 목적지에서 출발해 벽이 아닌 칸마다 숫자를 한 번씩 매기기 때문에, 살펴본 칸은 지도의 빈칸 수와 같아요. <span id="say4">지도가 같으면 유닛이 1개든 1000개든 같아요.</span></p>
+        <div class="ctrl" id="ctrl4"></div>
+        <div class="actions">
+          <button class="btn btn--primary" id="go4" type="button">출발</button>
+          <button class="btn" id="reset4" type="button">처음으로</button>
+        </div>
+        <dl class="readout">
+          <div><dt>출발할 때 살펴본 칸</dt><dd id="cells4">–</dd></div>
+          <div><dt>이동 중에 더 살펴본 칸</dt><dd id="extra4">–</dd></div>
+          <div><dt>한 칸을 가장 많이 본 횟수</dt><dd id="max4">–</dd></div>
+          <div><dt>도착</dt><dd id="arr4">–</dd></div>
+        </dl>
+        <p class="result" id="res4"></p>
+        <div class="keys" id="keys4"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 5단계 ================= -->
+  <section class="step" id="step5" aria-labelledby="q5" hidden>
+    <div class="step__head">
+      <p class="kicker">5단계 · 비교</p>
+      <h1 id="q5">둘이 같이 달리면?</h1>
+      <p class="say say--wide">같은 맵, 같은 유닛으로 두 방식을 동시에 출발시켜요. 살펴보는 과정은 두 화면 모두 같은 속도로 느리게 보여주기 때문에, 살펴볼 칸이 적은 쪽이 먼저 출발해요.</p>
+    </div>
+    <div class="dualbar">
+      <div class="actions">
+        <button class="btn btn--primary" id="go5" type="button">출발</button>
+        <button class="btn" id="reset5" type="button">처음으로</button>
+      </div>
+      <div class="ctrl ctrl--row" id="ctrl5"></div>
+    </div>
+    <div class="panes">
+      <article class="pane pane--astar" aria-labelledby="t5a">
+        <div class="pane__head"><h2 id="t5a">A* · 유닛마다 따로 찾기</h2></div>
+        <div class="map"><canvas id="cv5a" role="img" aria-label="A* 방식으로 움직이는 유닛 지도"></canvas><p class="map__status" id="st5a"></p></div>
+        <dl class="readout readout--3">
+          <div><dt>살펴본 칸</dt><dd id="cells5a">–</dd></div>
+          <div><dt>길 다시 찾기</dt><dd id="re5a">–</dd></div>
+          <div><dt>도착</dt><dd id="arr5a">–</dd></div>
+        </dl>
+      </article>
+      <article class="pane pane--flow" aria-labelledby="t5f">
+        <div class="pane__head"><h2 id="t5f">플로우 필드 · 지도 한 장 함께 쓰기</h2></div>
+        <div class="map"><canvas id="cv5f" role="img" aria-label="플로우 필드 방식으로 움직이는 유닛 지도"></canvas><p class="map__status" id="st5f"></p></div>
+        <dl class="readout readout--3">
+          <div><dt>살펴본 칸</dt><dd id="cells5f">–</dd></div>
+          <div><dt>길 다시 찾기</dt><dd id="re5f">–</dd></div>
+          <div><dt>도착</dt><dd id="arr5f">–</dd></div>
+        </dl>
+      </article>
+    </div>
+    <p class="result" id="res5"></p>
+    <div class="keys" id="keys5"></div>
+  </section>
+
+  <!-- ================= 6단계 ================= -->
+  <section class="step" id="step6" aria-labelledby="q6" hidden>
+    <div class="step__head">
+      <p class="kicker">6단계 · 비교</p>
+      <h1 id="q6">수치로는 얼마나 다를까?</h1>
+      <p class="say say--wide">조건을 하나씩만 바꿔 가며 재요. 표는 복사해서 보고서나 스프레드시트에 붙여 넣을 수 있어요.</p>
+    </div>
+    <div class="panel">
+      <div class="tabs" role="tablist" aria-label="실험 고르기" id="tabs"></div>
+      <div class="exp" id="exp" role="tabpanel"></div>
+    </div>
+    <details class="notes">
+      <summary>측정 기준 자세히 보기</summary>
+      <ul>
+        <li><b>살펴본 칸</b>은 탐색하면서 대기열에서 꺼내 확인한 칸의 수예요. 맵 번호와 조건이 같으면 어느 컴퓨터에서 재도 같은 값이 나와요.</li>
+        <li><b>계산 시간</b>은 컴퓨터와 브라우저에 따라 달라져요. 같은 계산을 3번 연습한 뒤 10번 이상 반복해 평균을 내요.</li>
+        <li><b>이동 규칙</b>은 두 방식이 같아요. 8방향으로 움직이고 대각선 한 칸은 1.4칸으로 계산해요. 벽 모서리는 대각선으로 지나갈 수 없고, 속도는 초당 6칸이에요.</li>
+        <li><b>A*</b>는 유닛마다 한 번씩 탐색하는 기본형이에요. 경로를 나눠 쓰거나 저장해 두는 추가 최적화는 넣지 않았어요.</li>
+        <li><b>플로우 필드</b>는 목적지마다 맵 전체의 거리를 한 번 재고, 칸마다 화살표를 하나씩 남겨요. 목적지가 여러 개면 지도를 목적지 수만큼 그려요.</li>
+        <li><b>충돌</b>을 켜면 유닛은 지름 0.5칸짜리 원이 되어 겹칠 때 서로 밀어내요. A* 유닛은 밀려나서 길의 다음 칸으로 바로 갈 수 없게 되면 그 자리에서 길을 다시 찾아요. 플로우 필드 유닛은 새로 선 칸의 화살표를 읽어요.</li>
+        <li><b>도착</b>은 목적지 칸에 들어온 순간이에요. 도착한 유닛은 화면에서 사라져요.</li>
+      </ul>
+    </details>
+  </section>
+
+  <nav class="pager" aria-label="단계 넘기기">
+    <button class="btn pager__btn" id="prev" type="button"></button>
+    <button class="btn pager__btn pager__btn--next" id="next" type="button"></button>
+  </nav>
+
+</main>
+<script>
+'use strict';
+/* =====================================================================
+   길찾기 핵심 로직 (화면과 무관한 순수 계산)
+   - 두 방식 모두 같은 규칙으로 움직인다.
+     · 8방향 이동, 직선 한 칸 = 10, 대각선 한 칸 = 14 (약 1.4칸)
+     · 벽 모서리를 대각선으로 가로지를 수 없다.
+   - "살펴본 칸" = 탐색 도중 대기열에서 꺼내 확인한 칸의 수.
+   ===================================================================== */
+
+// 8방향: 동, 남동, 남, 남서, 서, 북서, 북, 북동 (y는 아래로 증가)
+const DX = [1, 1, 0, -1, -1, -1, 0, 1];
+const DY = [0, 1, 1, 1, 0, -1, -1, -1];
+const COST = [10, 14, 10, 14, 10, 14, 10, 14];
+const INF = 0x3fffffff;
+
+const SIM = {
+  SPEED: 6,        // 유닛 속도 (칸/초)
+  DT: 1 / 60,      // 시뮬레이션 한 걸음의 시간 (초)
+  R: 0.25,         // 유닛 반지름 (칸)
+  MAX_T: 240,      // 이 시간(초)이 지나면 시뮬레이션을 멈춘다
+  MAX_UNITS: 1000
+};
+
+/* 시드가 같으면 항상 같은 수열을 내는 난수 생성기 */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* 가장 작은 값을 먼저 꺼내는 대기열 (이진 힙). A*와 플로우 필드가 같이 쓴다. */
+class MinHeap {
+  constructor(cap) {
+    this.key = new Float64Array(cap);
+    this.val = new Int32Array(cap);
+    this.n = 0;
+  }
+  clear() { this.n = 0; }
+  push(k, v) {
+    if (this.n >= this.key.length) {
+      const nk = new Float64Array(this.key.length * 2); nk.set(this.key); this.key = nk;
+      const nv = new Int32Array(this.val.length * 2); nv.set(this.val); this.val = nv;
+    }
+    const key = this.key, val = this.val;
+    let i = this.n++;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (key[p] <= k) break;
+      key[i] = key[p]; val[i] = val[p]; i = p;
+    }
+    key[i] = k; val[i] = v;
+  }
+  pop() {
+    const key = this.key, val = this.val;
+    const top = val[0];
+    const n = --this.n;
+    if (n > 0) {
+      const k = key[n], v = val[n];
+      let i = 0;
+      for (;;) {
+        let c = 2 * i + 1;
+        if (c >= n) break;
+        if (c + 1 < n && key[c + 1] < key[c]) c++;
+        if (key[c] >= k) break;
+        key[i] = key[c]; val[i] = val[c]; i = c;
+      }
+      key[i] = k; val[i] = v;
+    }
+    return top;
+  }
+}
+
+function makeGrid(W, H) {
+  const n = W * H;
+  return {
+    W, H, n,
+    walls: new Uint8Array(n),
+    // A*가 매번 새로 만들지 않고 돌려 쓰는 메모
+    g: new Int32Array(n),
+    seen: new Uint32Array(n),
+    closed: new Uint32Array(n),
+    parent: new Int32Array(n),
+    tmp: new Int32Array(n),
+    runId: 0,
+    lastExplored: 0,
+    heap: new MinHeap(n * 2 + 64)
+  };
+}
+
+/* ---------------------------------------------------------------------
+   A* : 유닛 하나가 start에서 goal까지 가는 가장 짧은 길을 찾는다.
+   - 유닛이 N개면 이 함수를 N번 부른다.
+   - heat가 있으면 살펴본 칸마다 횟수를 1씩 올린다(화면 표시용).
+   - out이 있으면 살펴본 칸을 순서대로 담는다(탐색 과정 다시 보기용).
+   돌려주는 값: 지나갈 칸의 목록(start → goal). 살펴본 칸 수는 G.lastExplored.
+   --------------------------------------------------------------------- */
+function astar(G, start, goal, heat, out) {
+  const W = G.W, H = G.H, walls = G.walls;
+  const g = G.g, seen = G.seen, closed = G.closed, parent = G.parent, heap = G.heap;
+  const id = ++G.runId;
+  const gx = goal % W, gy = (goal / W) | 0;
+
+  heap.clear();
+  g[start] = 0; seen[start] = id; parent[start] = -1;
+  heap.push(0, start);
+
+  let explored = 0, found = false;
+  while (heap.n > 0) {
+    const u = heap.pop();
+    if (closed[u] === id) continue;        // 이미 확인한 칸
+    closed[u] = id;
+    explored++;
+    if (heat) heat[u]++;
+    if (out) out.push(u);
+    if (u === goal) { found = true; break; }
+
+    const ux = u % W, uy = (u / W) | 0, gu = g[u];
+    for (let d = 0; d < 8; d++) {
+      const vx = ux + DX[d], vy = uy + DY[d];
+      if (vx < 0 || vy < 0 || vx >= W || vy >= H) continue;
+      const v = vy * W + vx;
+      if (walls[v]) continue;
+      // 대각선 이동은 양옆 칸이 모두 비어 있을 때만 가능
+      if ((d & 1) && (walls[uy * W + vx] || walls[vy * W + ux])) continue;
+      if (closed[v] === id) continue;
+      const ng = gu + COST[d];
+      if (seen[v] !== id || ng < g[v]) {
+        seen[v] = id; g[v] = ng; parent[v] = u;
+        // 목적지까지 남은 거리 어림값 (장애물이 없다고 가정한 8방향 거리)
+        const adx = vx > gx ? vx - gx : gx - vx;
+        const ady = vy > gy ? vy - gy : gy - vy;
+        const h = 10 * (adx + ady) - 6 * (adx < ady ? adx : ady);
+        // (지나온 거리 + 남은 어림값)이 작은 칸부터, 같으면 목적지에 가까운 칸부터
+        heap.push((ng + h) * 4096 + h, v);
+      }
+    }
+  }
+  G.lastExplored = explored;
+  if (!found) return null;
+
+  // 목적지에서 출발점까지 거슬러 올라가 길을 만든다
+  const tmp = G.tmp;
+  let len = 0;
+  for (let c = goal; c !== -1; c = parent[c]) tmp[len++] = c;
+  const path = new Int32Array(len);
+  for (let i = 0; i < len; i++) path[i] = tmp[len - 1 - i];
+  return path;
+}
+
+/* ---------------------------------------------------------------------
+   플로우 필드 : 목적지에서 거꾸로 퍼져 나가며 모든 칸의 거리를 잰다.
+   - 목적지 하나에 한 번만 부른다. 유닛이 몇 개든 상관없다.
+   - dist[칸] = 목적지까지의 거리, dir[칸] = 그 칸에서 가야 할 방향(0~7).
+   - order = 칸을 확인한 순서(탐색 과정 다시 보기용).
+   --------------------------------------------------------------------- */
+function flowField(G, goal, heat) {
+  const W = G.W, H = G.H, n = G.n, walls = G.walls, heap = G.heap;
+  const dist = new Int32Array(n).fill(INF);
+  const dir = new Int8Array(n).fill(-1);
+  const done = new Uint8Array(n);
+  const order = new Int32Array(n);
+
+  heap.clear();
+  dist[goal] = 0;
+  heap.push(0, goal);
+
+  let count = 0;
+  while (heap.n > 0) {
+    const u = heap.pop();
+    if (done[u]) continue;
+    done[u] = 1;
+    order[count++] = u;
+    if (heat) heat[u]++;
+
+    const ux = u % W, uy = (u / W) | 0, du = dist[u];
+    for (let d = 0; d < 8; d++) {
+      const vx = ux + DX[d], vy = uy + DY[d];
+      if (vx < 0 || vy < 0 || vx >= W || vy >= H) continue;
+      const v = vy * W + vx;
+      if (walls[v] || done[v]) continue;
+      if ((d & 1) && (walls[uy * W + vx] || walls[vy * W + ux])) continue;
+      const nd = du + COST[d];
+      if (nd < dist[v]) {
+        dist[v] = nd;
+        dir[v] = (d + 4) & 7;   // v에서 u 쪽을 가리키는 화살표
+        heap.push(nd, v);
+      }
+    }
+  }
+  return { goal, dist, dir, order: order.subarray(0, count), count };
+}
+
+/* 칸 a에서 이웃 칸 b로 한 번에 갈 수 있는가 */
+function legalStep(G, a, b) {
+  const W = G.W, walls = G.walls;
+  const ax = a % W, ay = (a / W) | 0, bx = b % W, by = (b / W) | 0;
+  const dx = bx - ax, dy = by - ay;
+  if (dx > 1 || dx < -1 || dy > 1 || dy < -1) return false;
+  if (walls[b]) return false;
+  if (dx !== 0 && dy !== 0 && (walls[ay * W + bx] || walls[by * W + ax])) return false;
+  return true;
+}
+
+/* ---------------------------------------------------------------------
+   맵 만들기 : 시드(맵 번호)가 같으면 항상 같은 맵이 나온다.
+   --------------------------------------------------------------------- */
+const GOAL_ANCHORS = [
+  [0.92, 0.50], [0.92, 0.16], [0.92, 0.84], [0.62, 0.08],
+  [0.62, 0.92], [0.76, 0.33], [0.76, 0.67], [0.50, 0.50]
+];
+
+function buildWorld(W, H, ratio, seed) {
+  const G = makeGrid(W, H), n = G.n, walls = G.walls;
+  const mix = (Math.imul(seed | 0, 0x9E3779B1) ^ Math.imul(W, 73856093) ^ Math.imul(H, 19349663)) | 0;
+  const rnd = mulberry32(mix);
+
+  // 1) 둥근 바위 덩어리를 목표 비율이 될 때까지 뿌린다
+  const target = Math.round(ratio * n);
+  let count = 0, guard = 0;
+  while (count < target && guard++ < 60000) {
+    const cx = rnd() * W, cy = rnd() * H;
+    const rx = 0.9 + rnd() * 2.3, ry = 0.9 + rnd() * 2.3;
+    const x0 = Math.max(0, Math.floor(cx - rx)), x1 = Math.min(W - 1, Math.ceil(cx + rx));
+    const y0 = Math.max(0, Math.floor(cy - ry)), y1 = Math.min(H - 1, Math.ceil(cy + ry));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const ex = (x + 0.5 - cx) / rx, ey = (y + 0.5 - cy) / ry;
+      const i = y * W + x;
+      if (ex * ex + ey * ey <= 1 && !walls[i]) { walls[i] = 1; count++; }
+    }
+  }
+
+  // 2) 목적지 후보 주변은 비워 둔다
+  const anchors = GOAL_ANCHORS.map(([fx, fy]) => [
+    Math.min(W - 1, Math.max(0, Math.round(fx * (W - 1)))),
+    Math.min(H - 1, Math.max(0, Math.round(fy * (H - 1))))
+  ]);
+  for (const [ax, ay] of anchors)
+    for (let y = ay - 1; y <= ay + 1; y++) for (let x = ax - 1; x <= ax + 1; x++)
+      if (x >= 0 && y >= 0 && x < W && y < H) walls[y * W + x] = 0;
+
+  // 3) 서로 이어진 가장 큰 빈 땅만 남기고, 갇힌 빈칸은 벽으로 메운다
+  const label = new Int32Array(n).fill(-1);
+  const stack = new Int32Array(n);
+  let best = -1, bestSize = 0, nLabel = 0;
+  for (let s = 0; s < n; s++) {
+    if (walls[s] || label[s] !== -1) continue;
+    let top = 0, size = 0;
+    stack[top++] = s; label[s] = nLabel;
+    while (top > 0) {
+      const u = stack[--top]; size++;
+      const ux = u % W, uy = (u / W) | 0;
+      for (let d = 0; d < 8; d++) {
+        const vx = ux + DX[d], vy = uy + DY[d];
+        if (vx < 0 || vy < 0 || vx >= W || vy >= H) continue;
+        const v = vy * W + vx;
+        if (walls[v] || label[v] !== -1) continue;
+        if ((d & 1) && (walls[uy * W + vx] || walls[vy * W + ux])) continue;
+        label[v] = nLabel; stack[top++] = v;
+      }
+    }
+    if (size > bestSize) { bestSize = size; best = nLabel; }
+    nLabel++;
+  }
+  let wallCount = 0;
+  for (let i = 0; i < n; i++) {
+    if (!walls[i] && label[i] !== best) walls[i] = 1;
+    if (walls[i]) wallCount++;
+  }
+
+  // 4) 목적지: 후보 위치에서 가장 가까운 빈칸
+  const goals = new Int32Array(anchors.length);
+  const used = new Set();
+  anchors.forEach(([ax, ay], gi) => {
+    let bi = -1, bd = Infinity;
+    for (let i = 0; i < n; i++) {
+      if (walls[i] || used.has(i)) continue;
+      const dx = (i % W) - ax, dy = ((i / W) | 0) - ay;
+      const dd = dx * dx + dy * dy;
+      if (dd < bd) { bd = dd; bi = i; }
+    }
+    goals[gi] = bi; used.add(bi);
+  });
+
+  // 5) 출발 위치: 맵 왼쪽 30% 구역의 빈칸을 섞어서 차례로 배정
+  const rnd2 = mulberry32(mix ^ 0x5bd1e995);
+  const zone = Math.max(2, Math.ceil(W * 0.3));
+  let cells = [];
+  for (let i = 0; i < n; i++) if (!walls[i] && (i % W) < zone && !used.has(i)) cells.push(i);
+  if (cells.length === 0) for (let i = 0; i < n; i++) if (!walls[i] && !used.has(i)) cells.push(i);
+  for (let i = cells.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd2() * (i + 1));
+    const t = cells[i]; cells[i] = cells[j]; cells[j] = t;
+  }
+  const M = SIM.MAX_UNITS;
+  const spawnX = new Float32Array(M), spawnY = new Float32Array(M);
+  for (let i = 0; i < M; i++) {
+    const c = cells[i % cells.length];
+    spawnX[i] = (c % W) + 0.5 + (rnd2() - 0.5) * 0.6;
+    spawnY[i] = ((c / W) | 0) + 0.5 + (rnd2() - 0.5) * 0.6;
+  }
+
+  return { G, W, H, n, seed, goals, spawnX, spawnY, wallCount, freeCount: n - wallCount };
+}
+
+/* ---------------------------------------------------------------------
+   유닛끼리 겹치지 않게 밀어내기 (충돌이 켜져 있을 때만)
+   한 칸 크기의 바구니에 유닛을 담아 가까운 유닛끼리만 비교한다.
+   --------------------------------------------------------------------- */
+const PUSH_NX = [1, 0.7071, 0, -0.7071, -1, -0.7071, 0, 0.7071];
+const PUSH_NY = [0, 0.7071, 1, 0.7071, 0, -0.7071, -1, -0.7071];
+
+function separate(B) {
+  const { W, H, walls, x, y, alive, N, head, next, px, py } = B;
+  const D = SIM.R * 2, D2 = D * D;
+  head.fill(-1);
+  for (let i = 0; i < N; i++) {
+    if (!alive[i]) continue;
+    const c = (y[i] | 0) * W + (x[i] | 0);
+    next[i] = head[c]; head[c] = i;
+    px[i] = 0; py[i] = 0;
+  }
+  let maxOverlap = 0;
+  for (let i = 0; i < N; i++) {
+    if (!alive[i]) continue;
+    const cx = x[i] | 0, cy = y[i] | 0;
+    for (let oy = -1; oy <= 1; oy++) {
+      const yy = cy + oy; if (yy < 0 || yy >= H) continue;
+      for (let ox = -1; ox <= 1; ox++) {
+        const xx = cx + ox; if (xx < 0 || xx >= W) continue;
+        for (let j = head[yy * W + xx]; j !== -1; j = next[j]) {
+          if (j <= i) continue;
+          const ddx = x[j] - x[i], ddy = y[j] - y[i];
+          const d2 = ddx * ddx + ddy * ddy;
+          if (d2 >= D2) continue;
+          let d = Math.sqrt(d2), nx, ny;
+          if (d < 1e-4) { const q = (i + j) & 7; nx = PUSH_NX[q]; ny = PUSH_NY[q]; d = 0; }
+          else { nx = ddx / d; ny = ddy / d; }
+          const push = (D - d) * 0.5;
+          if (D - d > maxOverlap) maxOverlap = D - d;
+          px[i] -= nx * push; py[i] -= ny * push;
+          px[j] += nx * push; py[j] += ny * push;
+        }
+      }
+    }
+  }
+  for (let i = 0; i < N; i++) {
+    if (!alive[i]) continue;
+    let mx = px[i] * 0.8, my = py[i] * 0.8;
+    if (mx > 0.3) mx = 0.3; else if (mx < -0.3) mx = -0.3;
+    if (my > 0.3) my = 0.3; else if (my < -0.3) my = -0.3;
+    if (mx !== 0 || my !== 0) tryMove(B, i, mx, my);
+  }
+  return maxOverlap;
+}
+
+/* 벽 안으로는 들어가지 못하게 하면서 유닛을 옮긴다 */
+function tryMove(B, i, mx, my) {
+  const W = B.W, H = B.H, walls = B.walls, x = B.x, y = B.y;
+  // 좌표는 32비트 실수로 저장되므로, 저장될 값 그대로 벽 검사를 한다
+  let nx = Math.fround(x[i] + mx);
+  if (nx < 0.02) nx = 0.02; else if (nx > W - 0.02) nx = W - 0.02;
+  nx = Math.fround(nx);
+  if (!walls[(y[i] | 0) * W + (nx | 0)]) x[i] = nx;
+  let ny = Math.fround(y[i] + my);
+  if (ny < 0.02) ny = 0.02; else if (ny > H - 0.02) ny = H - 0.02;
+  ny = Math.fround(ny);
+  if (!walls[(ny | 0) * W + (x[i] | 0)]) y[i] = ny;
+}
+
+/* 출발 위치. 충돌을 켜면 처음부터 겹치지 않도록 미리 펼쳐 둔다. */
+function startPositions(world, N, collide) {
+  const W = world.W, H = world.H;
+  const x = new Float32Array(N), y = new Float32Array(N);
+  for (let i = 0; i < N; i++) { x[i] = world.spawnX[i]; y[i] = world.spawnY[i]; }
+  if (collide && N > 1) {
+    const B = {
+      W, H, walls: world.G.walls, x, y, N,
+      alive: new Uint8Array(N).fill(1),
+      head: new Int32Array(world.n), next: new Int32Array(N),
+      px: new Float32Array(N), py: new Float32Array(N)
+    };
+    for (let it = 0; it < 80; it++) if (separate(B) < 0.01) break;
+  }
+  const cell = new Int32Array(N);
+  for (let i = 0; i < N; i++) cell[i] = (y[i] | 0) * W + (x[i] | 0);
+  return { x, y, cell };
+}
+
+/* ---------------------------------------------------------------------
+   출발 신호 때의 계산
+   --------------------------------------------------------------------- */
+function computeAStarAll(world, start, N, k, heat, keepPaths) {
+  const G = world.G, goals = world.goals;
+  const paths = keepPaths ? new Array(N) : null;
+  let total = 0;
+  for (let i = 0; i < N; i++) {
+    const p = astar(G, start.cell[i], goals[i % k], heat, null);
+    total += G.lastExplored;
+    if (paths) paths[i] = p;
+  }
+  return { total, paths };
+}
+
+function computeFlowAll(world, N, k, heat) {
+  const used = Math.min(k, N);
+  const fields = new Array(used);
+  let total = 0;
+  for (let g = 0; g < used; g++) {
+    fields[g] = flowField(world.G, world.goals[g], heat);
+    total += fields[g].count;
+  }
+  return { total, fields };
+}
+
+/* ---------------------------------------------------------------------
+   이동 시뮬레이션
+   mode 'astar': 미리 찾아 둔 길의 다음 칸 중심을 향해 간다.
+                 밀려나서 다음 칸으로 바로 갈 수 없게 되면 그 자리에서 다시 탐색한다.
+   mode 'flow' : 지금 서 있는 칸의 화살표 방향으로 간다.
+   --------------------------------------------------------------------- */
+function makeSim(world, start, N, k, mode, collide, data) {
+  const S = {
+    world, W: world.W, H: world.H, walls: world.G.walls,
+    N, k, mode, collide,
+    x: Float32Array.from(start.x), y: Float32Array.from(start.y),
+    alive: new Uint8Array(N).fill(1),
+    arrived: 0, t: 0, steps: 0, finishedAt: -1,
+    replans: 0, extra: 0,
+    head: null, next: null, px: null, py: null
+  };
+  if (mode === 'astar') { S.paths = data.paths.slice(); S.pi = new Int32Array(N).fill(1); }
+  else S.fields = data.fields;
+  if (collide) {
+    S.head = new Int32Array(world.n); S.next = new Int32Array(N);
+    S.px = new Float32Array(N); S.py = new Float32Array(N);
+  }
+  return S;
+}
+
+function simStep(S) {
+  const world = S.world, G = world.G, W = S.W, goals = world.goals;
+  const x = S.x, y = S.y, alive = S.alive, N = S.N, k = S.k;
+  const stepLen = SIM.SPEED * SIM.DT;
+  const isFlow = S.mode === 'flow';
+
+  for (let i = 0; i < N; i++) {
+    if (!alive[i]) continue;
+    const c = (y[i] | 0) * W + (x[i] | 0);
+    const goal = goals[i % k];
+    if (c === goal) { alive[i] = 0; S.arrived++; continue; }   // 목적지 칸에 들어오면 도착
+
+    if (isFlow) {
+      const d = S.fields[i % k].dir[c];
+      if (d < 0) continue;
+      const diag = d & 1;
+      const m = diag ? stepLen * 0.70710678 : stepLen;
+      tryMove(S, i, DX[d] * m, DY[d] * m);
+    } else {
+      let path = S.paths[i], pi = S.pi[i];
+      if (c === path[pi]) {
+        pi++;                                   // 다음 칸에 들어섰으니 그다음 칸을 목표로
+      } else if (c !== path[pi - 1]) {
+        // 다른 유닛에게 밀려 길에서 벗어남
+        let found = -1;
+        const end = Math.min(path.length, pi + 6);
+        for (let j = pi + 1; j < end; j++) if (path[j] === c) { found = j; break; }
+        if (found >= 0) pi = found + 1;         // 길의 앞쪽 칸으로 밀려온 경우
+        else if (!legalStep(G, c, path[pi])) {
+          path = astar(G, c, goal, null, null); // 그 자리에서 다시 탐색
+          S.paths[i] = path; pi = 1;
+          S.replans++; S.extra += G.lastExplored;
+        }
+      }
+      S.pi[i] = pi;
+      const t = path[pi];
+      const tx = (t % W) + 0.5 - x[i], ty = ((t / W) | 0) + 0.5 - y[i];
+      const dist = Math.sqrt(tx * tx + ty * ty);
+      if (dist > 1e-6) {
+        const m = dist < stepLen ? 1 : stepLen / dist;
+        tryMove(S, i, tx * m, ty * m);
+      }
+    }
+  }
+  if (S.collide) separate(S);
+  S.steps++;
+  S.t = S.steps * SIM.DT;
+  if (S.arrived === N && S.finishedAt < 0) S.finishedAt = S.t;
+}
+
+/* 화면 없이 끝까지 돌린다(자동 측정용). */
+function runToEnd(S, maxSteps) {
+  const limit = maxSteps || Math.round(SIM.MAX_T / SIM.DT);
+  while (S.arrived < S.N && S.steps < limit) simStep(S);
+  return S;
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    DX, DY, COST, INF, SIM, mulberry32, MinHeap, makeGrid, astar, flowField, legalStep,
+    buildWorld, separate, tryMove, startPositions, computeAStarAll, computeFlowAll,
+    makeSim, simStep, runToEnd
+  };
+}
+</script>
+<script>
+(function () {
+'use strict';
+
+/* =====================================================================
+   화면 1부: 그리기 도구, 지도, 유닛, 1~5단계
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const fmt = n => Math.round(n).toLocaleString('ko-KR');
+const TAU = Math.PI * 2;
+const MAPW = 80, MAPH = 50, RATIO = 0.2, NCELL = MAPW * MAPH;
+const UNIT_LEVELS = [1, 10, 50, 100, 500, 1000];
+const GOAL_LEVELS = [1, 2, 4, 8];
+const BIG = 0x3fffffff;
+
+const STEPS = [
+  { short: '유닛 하나의 길찾기', group: 0 }, { short: '유닛이 많아지면', group: 0 },
+  { short: '지도 한 장 그리기', group: 1 }, { short: '유닛이 많아지면', group: 1 },
+  { short: '둘이 같이 달리기', group: 2 }, { short: '수치로 재기', group: 2 }
+];
+const GROUPS = [{ name: 'A*', cls: 'astar' }, { name: '플로우 필드', cls: 'flow' }, { name: '비교', cls: 'both' }];
+
+const state = { step: 1, seed: 7, units: 500, collide: 1, game: 1, speed: 1, pace: 1, tab: 0, log: false };
+
+function fmtMs(v) {
+  if (!(v > 0)) return '0';
+  if (v < 0.1) return v.toFixed(3);
+  if (v < 10) return v.toFixed(2);
+  if (v < 100) return v.toFixed(1);
+  return fmt(v);
+}
+function fmtRatio(v) {
+  if (!isFinite(v)) return '–';
+  return v >= 100 ? fmt(v) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+}
+/* 거리 숫자: 10이 한 칸. 1, 1.4, 2, 2.4 … */
+function fmtDist(d10) { return d10 % 10 === 0 ? String(d10 / 10) : (d10 / 10).toFixed(1); }
+/* 같은 계산을 여러 번 돌려 한 번에 걸리는 평균 시간(ms)을 잰다 */
+function timeIt(fn, minMs, minRuns, warm) {
+  for (let i = 0; i < warm; i++) fn();
+  let runs = 0;
+  const t0 = performance.now();
+  let t = t0;
+  do { fn(); runs++; t = performance.now(); }
+  while ((t - t0 < minMs || runs < minRuns) && runs < 4000);
+  return (t - t0) / runs;
+}
+function setDD(id, main, small) {
+  const dd = $(id);
+  dd.textContent = main;
+  if (small) { const s = document.createElement('small'); s.textContent = small; dd.appendChild(s); }
+}
+
+/* ---------- 색 ---------- */
+function hexRgb(h) {
+  h = h.trim();
+  if (h.length === 4) h = '#' + h[1] + h[1] + h[2] + h[2] + h[3] + h[3];
+  const n = parseInt(h.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function mixRgb(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+function cssRgb(c, a) { return 'rgba(' + Math.round(c[0]) + ',' + Math.round(c[1]) + ',' + Math.round(c[2]) + ',' + (a == null ? 1 : a) + ')'; }
+function buildLut(stops) {
+  const lut = new Uint8Array(256 * 3);
+  for (let i = 0; i < 256; i++) {
+    const t = i / 255;
+    let s = 0;
+    while (s < stops.length - 2 && t > stops[s + 1][0]) s++;
+    const a = stops[s], b = stops[s + 1];
+    const u = Math.max(0, Math.min(1, (t - a[0]) / (b[0] - a[0])));
+    for (let c = 0; c < 3; c++) lut[i * 3 + c] = Math.round(a[1][c] + (b[1][c] - a[1][c]) * u);
+  }
+  return lut;
+}
+let T = null;
+function readTheme() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = name => cs.getPropertyValue(name).trim();
+  const ground = hexRgb(v('--ground')), ink = hexRgb(v('--ink'));
+  T = {
+    ground, ink, wall: hexRgb(v('--wall')), heat2: hexRgb(v('--heat-2')),
+    lut: buildLut([[0, ground], [0.15, hexRgb(v('--heat-1'))], [0.45, hexRgb(v('--heat-2'))], [0.75, hexRgb(v('--heat-3'))], [1, hexRgb(v('--heat-4'))]]),
+    groundCss: v('--ground'), wallCss: v('--wall'), inkCss: v('--ink'), ink2Css: v('--ink-2'), mutedCss: v('--muted'),
+    paperCss: v('--paper'), astarCss: v('--astar'), flowCss: v('--flow'),
+    gridLine: cssRgb(ink, 0.075), gridLine2: cssRgb(ink, 0.14),
+    dark: (ground[0] * 0.299 + ground[1] * 0.587 + ground[2] * 0.114) < 128,
+    mono: v('--font-mono'), key: v('--ground') + v('--wall')
+  };
+}
+
+/* 게임 화면은 밝고 어두운 테마와 상관없이 같은 색을 쓴다 */
+const GM = {
+  grass: ['#6d9d6c', '#689867', '#72a271'], dirt: ['#9a9a6d', '#a09e72'], tuft: '#4f7d53',
+  rock: ['#5c6773', '#586370', '#606b77'], rockHi: '#95a2ae', rockMid: '#76828e', rockLo: '#333c45', rockLo2: '#454f5a',
+  shadow: 'rgba(14,26,20,0.26)', outline: '#16202a', astar: '#2a78d6', flow: '#eb6834',
+  veil: [247, 242, 224], fresh: [247, 207, 90], ink: '#16202a', arrow: '#22303b',
+  lut: buildLut([[0, [253, 241, 194]], [0.15, [253, 241, 194]], [0.45, [247, 207, 90]], [0.75, [221, 154, 8]], [1, [150, 96, 10]]])
+};
+
+/* ---------- 맵과 미리 계산해 둔 값 ---------- */
+let world = null, field = null, heatF = null, dmax = 1, one = null, crowd = null;
+
+function loadWorld() {
+  world = buildWorld(MAPW, MAPH, RATIO, state.seed);
+  field = flowField(world.G, world.goals[0], null);
+  dmax = field.dist[field.order[field.count - 1]] || 1;
+  heatF = new Uint32Array(NCELL);
+  for (let i = 0; i < field.count; i++) heatF[field.order[i]] = 1;
+  one = null; crowd = null;
+}
+/* 1단계: 유닛 하나 */
+function getOne() {
+  if (one) return one;
+  const start = startPositions(world, 1, false);
+  const list = [];
+  const path = astar(world.G, start.cell[0], world.goals[0], null, list);
+  const heatA = new Uint32Array(NCELL);
+  for (let i = 0; i < list.length; i++) heatA[list[i]] = 1;
+  one = { N: 1, start, paths: [path], totalA: list.length, heatA, heatMax: 1, flatT: 0.5, collide: false, len10: field.dist[start.cell[0]] };
+  return one;
+}
+/* 2, 4, 5단계: 고른 유닛 수와 충돌 설정 */
+function getCrowd() {
+  const N = state.units, col = !!state.collide;
+  if (crowd && crowd.N === N && crowd.collide === col) return crowd;
+  const start = startPositions(world, N, col);
+  const heatA = new Uint32Array(NCELL);
+  const res = computeAStarAll(world, start, N, 1, heatA, true);
+  let mx = 1;
+  for (let i = 0; i < NCELL; i++) if (heatA[i] > mx) mx = heatA[i];
+  crowd = { N, collide: col, start, paths: res.paths, totalA: res.total, heatA, heatMax: mx };
+  return crowd;
+}
+
+/* ---------- 땅과 벽 그리기 ---------- */
+function hash2(x, y, s) {
+  let h = Math.imul(x + 374761393, 668265263) ^ Math.imul(y + s * 7 + 1274126177, -2048144777);
+  h = Math.imul(h ^ (h >>> 13), -1028477379);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+/* 부드럽게 이어지는 얼룩(흙바닥 자리) */
+function patch(x, y) {
+  const P = 7, s = state.seed + 1000;
+  const gx = x / P, gy = y / P, x0 = Math.floor(gx), y0 = Math.floor(gy);
+  const fx = gx - x0, fy = gy - y0, sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+  const a = hash2(x0, y0, s), b = hash2(x0 + 1, y0, s), c = hash2(x0, y0 + 1, s), d = hash2(x0 + 1, y0 + 1, s);
+  return (a + (b - a) * sx) * (1 - sy) + (c + (d - c) * sx) * sy;
+}
+function drawTile(c, x, y, px, py, w, h, game) {
+  const walls = world.G.walls, i = y * MAPW + x;
+  if (!game) { c.fillStyle = walls[i] ? T.wallCss : T.groundCss; c.fillRect(px, py, w, h); return; }
+  const r = hash2(x, y, state.seed);
+  if (!walls[i]) {
+    const dirt = patch(x, y) > 0.62;
+    c.fillStyle = dirt ? GM.dirt[(r * 2) | 0] : GM.grass[(r * 3) | 0];
+    c.fillRect(px, py, w, h);
+    if (w >= 9 && r > 0.7 && !dirt) {                   // 풀 포기
+      const u = Math.max(1, Math.round(w / 9));
+      const tx = px + Math.round(w * (0.15 + 0.5 * hash2(x, y, 91))), ty = py + Math.round(h * (0.2 + 0.45 * hash2(x, y, 37)));
+      c.fillStyle = GM.tuft;
+      c.fillRect(tx, ty, u, u * 2); c.fillRect(tx + u * 2, ty + u, u, u);
+    }
+    if (y > 0 && walls[i - MAPW]) { c.fillStyle = GM.shadow; c.fillRect(px, py, w, Math.max(1, Math.round(h * 0.3))); }
+    return;
+  }
+  // 바위: 위와 왼쪽은 밝게, 아래와 오른쪽은 어둡게 깎아 솟아 보이게 한다
+  c.fillStyle = GM.rock[(r * 3) | 0];
+  c.fillRect(px, py, w, h);
+  const e = Math.max(1, Math.round(w * 0.2)), eb = Math.max(1, Math.round(h * 0.3));
+  const up = y > 0 && !walls[i - MAPW], dn = y < MAPH - 1 && !walls[i + MAPW];
+  const lf = x > 0 && !walls[i - 1], rt = x < MAPW - 1 && !walls[i + 1];
+  if (rt) { c.fillStyle = GM.rockLo2; c.fillRect(px + w - e, py, e, h); }
+  if (lf) { c.fillStyle = GM.rockMid; c.fillRect(px, py, e, h); }
+  if (dn) { c.fillStyle = GM.rockLo; c.fillRect(px, py + h - eb, w, eb); }
+  if (up) { c.fillStyle = GM.rockHi; c.fillRect(px, py, w, e); }
+  if (w >= 9 && r > 0.78 && !up && !dn && !lf && !rt) {
+    const u = Math.max(1, Math.round(w / 9));
+    c.fillStyle = GM.rockLo2;
+    c.fillRect(px + Math.round(w * 0.3), py + Math.round(h * 0.35), u * 2, u);
+    c.fillRect(px + Math.round(w * 0.3) + u * 2, py + Math.round(h * 0.35) + u, u, u);
+  }
+}
+
+/* ---------- 지도 전체를 그리는 화면 ---------- */
+function mkView(id) {
+  const canvas = $(id);
+  const base = document.createElement('canvas'), tiny = document.createElement('canvas'), terrain = document.createElement('canvas');
+  tiny.width = MAPW; tiny.height = MAPH;
+  const v = {
+    canvas, ctx: canvas.getContext('2d'), base, bctx: base.getContext('2d'),
+    tiny, tctx: tiny.getContext('2d'), terrain, rctx: terrain.getContext('2d'),
+    tkey: '', img: null, cell: 1, dpr: 1
+  };
+  v.img = v.tctx.createImageData(MAPW, MAPH);
+  return v;
+}
+/* 0: 안 보임, 1: 그대로, 2: 크기가 바뀜 */
+function fitView(v) {
+  const rect = v.canvas.getBoundingClientRect();
+  if (rect.width < 2) return 0;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(160, Math.round(rect.width * dpr)), h = Math.round(w * MAPH / MAPW);
+  let changed = false;
+  if (v.canvas.width !== w || v.canvas.height !== h) {
+    v.canvas.width = w; v.canvas.height = h; v.base.width = w; v.base.height = h;
+    v.terrain.width = w; v.terrain.height = h; v.tkey = '';
+    changed = true;
+  }
+  v.cell = w / MAPW; v.dpr = dpr;
+  return changed ? 2 : 1;
+}
+function ensureTerrain(v) {
+  const key = state.seed + '|' + v.terrain.width + '|' + state.game + '|' + T.key;
+  if (v.tkey === key) return;
+  v.tkey = key;
+  const c = v.rctx, cell = v.cell, game = !!state.game;
+  for (let y = 0; y < MAPH; y++) {
+    const py = Math.round(y * cell), py1 = Math.round((y + 1) * cell);
+    for (let x = 0; x < MAPW; x++) {
+      const px = Math.round(x * cell), px1 = Math.round((x + 1) * cell);
+      drawTile(c, x, y, px, py, px1 - px, py1 - py, game);
+    }
+  }
+}
+
+/* 지도 위에 겹쳐 그릴 것들
+   L.heat    : 칸마다 살펴본 횟수 (L.heatMax로 색 눈금, L.flatT면 한 가지 색)
+   L.reveal  : { level10, fresh } 목적지에서 level10까지 숫자를 매긴 칸
+   L.arrows  : 이 거리까지 화살표 표시 (-1이면 없음)
+   L.paths   : 유닛들의 길
+   L.zoomRect: 확대 창이 보고 있는 자리 */
+function paintBase(v, L) {
+  const walls = world.G.walls, game = !!state.game;
+  ensureTerrain(v);
+  const c = v.bctx, cw = v.base.width, ch = v.base.height, cell = v.cell, dpr = v.dpr, cellCss = cell / dpr;
+  c.globalAlpha = 1;
+  c.drawImage(v.terrain, 0, 0);
+
+  if (L.heat || L.reveal) {
+    const data = v.img.data, heat = L.heat, rv = L.reveal, dist = field.dist;
+    const lut = game ? GM.lut : T.lut, lmax = Math.log(Math.max(L.heatMax || 1, 10));
+    const flat = L.flatT ? ((L.flatT * 255) | 0) * 3 : -1;
+    const hA = game ? 168 : 255;
+    const band = 10 * Math.max(2, Math.round(MAPW / 20));
+    const ground = T.ground, ink = T.ink, veil = GM.veil;
+    const fresh = game ? GM.fresh : T.heat2;
+    const s0 = T.dark ? 0.02 : 0.035, s1 = T.dark ? 0.11 : 0.15, s2 = T.dark ? 0.03 : 0.04;
+    for (let i = 0, o = 0; i < NCELL; i++, o += 4) {
+      let r = 0, g = 0, b = 0, a = 0;
+      if (!walls[i]) {
+        if (heat) {
+          const cnt = heat[i];
+          if (cnt > 0) {
+            let q = flat;
+            if (q < 0) { let t = 0.15 + 0.85 * Math.log(cnt) / lmax; if (t > 1) t = 1; q = ((t * 255) | 0) * 3; }
+            r = lut[q]; g = lut[q + 1]; b = lut[q + 2]; a = hA;
+          }
+        } else if (rv) {
+          const d = dist[i];
+          if (d <= rv.level10) {
+            const odd = ((d / band) | 0) & 1;
+            if (rv.fresh && d > rv.level10 - 20) { r = fresh[0]; g = fresh[1]; b = fresh[2]; a = game ? 220 : 255; }
+            else if (game) { r = veil[0]; g = veil[1]; b = veil[2]; a = odd ? 150 : 112; }
+            else {
+              const t = s0 + s1 * d / dmax + (odd ? s2 : 0);
+              r = ground[0] + (ink[0] - ground[0]) * t; g = ground[1] + (ink[1] - ground[1]) * t; b = ground[2] + (ink[2] - ground[2]) * t; a = 255;
+            }
+          }
+        }
+      }
+      data[o] = r; data[o + 1] = g; data[o + 2] = b; data[o + 3] = a;
+    }
+    v.tctx.putImageData(v.img, 0, 0);
+    c.imageSmoothingEnabled = false;
+    c.drawImage(v.tiny, 0, 0, cw, ch);
+  }
+
+  if (!game && cellCss >= 6) {                      // 모눈 선
+    c.beginPath();
+    for (let x = 1; x < MAPW; x++) { const px = Math.round(x * cell) + 0.5; c.moveTo(px, 0); c.lineTo(px, ch); }
+    for (let y = 1; y < MAPH; y++) { const py = Math.round(y * cell) + 0.5; c.moveTo(0, py); c.lineTo(cw, py); }
+    c.strokeStyle = T.gridLine; c.lineWidth = 1; c.stroke();
+  }
+  if (L.paths) drawPaths(c, v, L.paths, game);
+  if (L.arrows >= 0) drawArrows(c, v, L.arrows, game);
+  const gc = world.goals[0];
+  drawGoal(c, ((gc % MAPW) + 0.5) * cell, (((gc / MAPW) | 0) + 0.5) * cell, cell, dpr, game);
+  if (L.zoomRect) {
+    const z = L.zoomRect, x = z.x * cell, y = z.y * cell, w = z.w * cell, h = z.h * cell;
+    c.lineJoin = 'miter';
+    c.strokeStyle = game ? 'rgba(253,253,245,0.9)' : T.groundCss; c.lineWidth = 4 * dpr; c.strokeRect(x, y, w, h);
+    c.strokeStyle = game ? GM.outline : T.inkCss; c.lineWidth = 2 * dpr; c.strokeRect(x, y, w, h);
+  }
+}
+
+function drawPaths(c, v, D, game) {
+  const cell = v.cell, N = D.N;
+  c.save();
+  c.lineJoin = 'round'; c.lineCap = 'round';
+  const alpha = Math.max(0.05, Math.min(0.95, 1.6 / Math.sqrt(N)));
+  const trace = i => {
+    const path = D.paths[i];
+    c.beginPath();
+    c.moveTo(D.start.x[i] * cell, D.start.y[i] * cell);
+    for (let j = 1; j < path.length; j++) c.lineTo(((path[j] % MAPW) + 0.5) * cell, (((path[j] / MAPW) | 0) + 0.5) * cell);
+  };
+  const lw = Math.max(1.5 * v.dpr, Math.min(cell * 0.28, 4 * v.dpr));
+  if (N <= 3) {                                     // 길이 몇 개뿐이면 흰 테두리를 둘러 또렷하게
+    c.strokeStyle = game ? 'rgba(253,253,245,0.95)' : T.groundCss; c.lineWidth = lw + 3 * v.dpr;
+    for (let i = 0; i < N; i++) { trace(i); c.stroke(); }
+  }
+  c.strokeStyle = game ? GM.astar : T.astarCss; c.lineWidth = lw; c.globalAlpha = alpha;
+  for (let i = 0; i < N; i++) { trace(i); c.stroke(); }
+  c.restore();
+}
+
+function drawArrows(c, v, limit10, game) {
+  const cell = v.cell, dpr = v.dpr, cellCss = cell / dpr, dir = field.dir, dist = field.dist;
+  const s = Math.max(1, Math.ceil(9 / cellCss)), off = (s - 1) >> 1;
+  const CA = -0.848, SA = 0.53;
+  c.save();
+  c.beginPath();
+  for (let y = off; y < MAPH; y += s) for (let x = off; x < MAPW; x += s) {
+    const i = y * MAPW + x, d = dir[i];
+    if (d < 0 || dist[i] > limit10) continue;
+    const inv = (d & 1) ? 0.7071 : 1, ux = DX[d] * inv, uy = DY[d] * inv;
+    const cx = (x + 0.5) * cell, cy = (y + 0.5) * cell, L = 0.31 * s * cell, hl = L * 0.8;
+    const x1 = cx + ux * L, y1 = cy + uy * L;
+    c.moveTo(cx - ux * L, cy - uy * L); c.lineTo(x1, y1);
+    c.moveTo(x1 + (ux * CA - uy * SA) * hl, y1 + (ux * SA + uy * CA) * hl); c.lineTo(x1, y1);
+    c.lineTo(x1 + (ux * CA + uy * SA) * hl, y1 + (-ux * SA + uy * CA) * hl);
+  }
+  c.strokeStyle = game ? GM.arrow : T.ink2Css; c.globalAlpha = game ? 0.6 : 0.85;
+  c.lineWidth = Math.max(1, 1.2 * dpr); c.lineJoin = 'round'; c.lineCap = 'round';
+  c.stroke();
+  c.restore();
+}
+
+function drawGoal(c, cx, cy, cell, dpr, game, hpx) {
+  c.save();
+  if (!game) {
+    const r = Math.max(5.5 * dpr, cell * 0.62);
+    c.beginPath(); c.arc(cx, cy, r, 0, TAU);
+    c.fillStyle = T.groundCss; c.fill();
+    c.lineWidth = 2 * dpr; c.strokeStyle = T.inkCss; c.stroke();
+    c.beginPath(); c.arc(cx, cy, r * 0.42, 0, TAU);
+    c.fillStyle = T.inkCss; c.fill();
+  } else {                                            // 깃발
+    const h = hpx || Math.max(15 * dpr, cell * 2.3), pw = Math.max(2, Math.round(h * 0.09)), lw = Math.max(1, Math.round(h * 0.05));
+    c.fillStyle = 'rgba(14,26,20,0.3)';
+    c.beginPath(); c.ellipse(cx, cy, h * 0.3, h * 0.12, 0, 0, TAU); c.fill();
+    const x0 = Math.round(cx - pw / 2), top = Math.round(cy - h);
+    c.fillStyle = GM.outline; c.fillRect(x0 - lw, top - lw, pw + lw * 2, h + lw * 2);
+    c.fillStyle = '#f6f1e2'; c.fillRect(x0, top, pw, h);
+    c.beginPath();
+    c.moveTo(x0 + pw, top); c.lineTo(x0 + pw + h * 0.62, top + h * 0.2); c.lineTo(x0 + pw, top + h * 0.42); c.closePath();
+    c.fillStyle = '#f2c230'; c.fill();
+    c.lineWidth = lw; c.lineJoin = 'round'; c.strokeStyle = GM.outline; c.stroke();
+  }
+  c.restore();
+}
+
+/* ---------- 유닛 그리기 ---------- */
+const SPR_BIG = { size: 10, frames: [
+  ['...KKKK...', '..KHHHHK..', '..KHHVVK..', '..KHHHHK..', '.KKCCCCKK.', 'KCKCCCCKCK', '.KKCCCCKK.', '..KCCCCK..', '..KLKKLK..', '..KK..KK..'],
+  ['...KKKK...', '..KHHHHK..', '..KHHVVK..', '..KHHHHK..', '.KKCCCCKK.', 'KCKCCCCKCK', '.KKCCCCKK.', '..KCCCCK..', '.KLKKKKLK.', '.KK....KK.']
+] };
+const SPR_SMALL = { size: 6, frames: [
+  ['.KKKK.', 'KHHVVK', 'KCCCCK', 'KCCCCK', '.KLLK.', '.K..K.'],
+  ['.KKKK.', 'KHHVVK', 'KCCCCK', 'KCCCCK', 'KLKKLK', 'K....K']
+] };
+const sprCache = {};
+/* 한 장에 [걷기1 오른쪽, 걷기2 오른쪽, 걷기1 왼쪽, 걷기2 왼쪽] */
+function spriteSheet(kind, k, team) {
+  const key = kind.size + '|' + k + '|' + team;
+  if (sprCache[key]) return sprCache[key];
+  const n = kind.size, sz = n * k, cv = document.createElement('canvas');
+  cv.width = sz * 4; cv.height = sz;
+  const c = cv.getContext('2d'), base = hexRgb(team === 'astar' ? GM.astar : GM.flow);
+  const pal = { K: GM.outline, C: cssRgb(base), H: cssRgb(mixRgb(base, [255, 255, 255], 0.5)), L: cssRgb(mixRgb(base, [0, 0, 0], 0.4)), V: '#fdfdf5' };
+  for (let f = 0; f < 2; f++) for (let flip = 0; flip < 2; flip++) {
+    const rows = kind.frames[f], ox = (f + flip * 2) * sz;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const ch = rows[y][flip ? n - 1 - x : x];
+      if (ch === '.') continue;
+      c.fillStyle = pal[ch]; c.fillRect(ox + x * k, y * k, k, k);
+    }
+  }
+  return (sprCache[key] = cv);
+}
+function prepSim(S) {
+  S.face = new Int8Array(S.N).fill(1);
+  S.lastX = Float32Array.from(S.x);
+  S.ord = new Int32Array(S.N);
+}
+function paintUnits(c, S, team, cell, dpr, ox, oy, cw, ch, moving, time, scale) {
+  if (!S) return;
+  const N = S.N, x = S.x, y = S.y, alive = S.alive, face = S.face, lastX = S.lastX;
+  for (let i = 0; i < N; i++) {
+    if (!alive[i]) continue;
+    const dx = x[i] - lastX[i];
+    if (dx > 0.003) face[i] = 1; else if (dx < -0.003) face[i] = -1;
+    lastX[i] = x[i];
+  }
+  if (!state.game) {
+    const r = Math.max(1.25 * dpr, 0.3 * cell * (scale ? scale * 1.6 : 1));
+    c.beginPath();
+    for (let i = 0; i < N; i++) {
+      if (!alive[i]) continue;
+      const px = x[i] * cell + ox, py = y[i] * cell + oy;
+      if (px < -r || py < -r || px > cw + r || py > ch + r) continue;
+      c.moveTo(px + r, py); c.arc(px, py, r, 0, TAU);
+    }
+    if (cell / dpr >= 9) { c.lineWidth = 2 * dpr; c.strokeStyle = T.groundCss; c.stroke(); }
+    c.fillStyle = team === 'astar' ? T.astarCss : T.flowCss;
+    c.fill();
+    return;
+  }
+  const target = cell * (scale || 1.1);
+  const kb = Math.max(1, Math.floor(target / 10 + 0.25)), ks = Math.max(1, Math.floor(target / 6 + 0.25));
+  const useBig = Math.abs(kb * 10 - target) <= Math.abs(ks * 6 - target);
+  const kind = useBig ? SPR_BIG : SPR_SMALL, k = useBig ? kb : ks;
+  const sheet = spriteSheet(kind, k, team), sz = kind.size * k;
+  const ord = S.ord;
+  let n = 0;
+  for (let i = 0; i < N; i++) if (alive[i]) ord[n++] = i;
+  const sub = ord.subarray(0, n);
+  if (n > 1) sub.sort((a, b) => y[a] - y[b]);        // 아래쪽 유닛이 위에 그려지게
+  c.imageSmoothingEnabled = false;
+  const tick = (time * 6) | 0;
+  for (let q = 0; q < n; q++) {
+    const i = sub[q], px = x[i] * cell + ox, py = y[i] * cell + oy;
+    if (px < -sz || py < -sz || px > cw + sz || py > ch + sz) continue;
+    const col = (moving ? ((tick + i) & 1) : 0) + (face[i] < 0 ? 2 : 0);
+    c.drawImage(sheet, col * sz, 0, sz, sz, Math.round(px - sz / 2), Math.round(py - sz * 0.7), sz, sz);
+  }
+}
+
+/* ---------- 조건 고르는 단추 (여러 단계에서 같은 값을 함께 쓴다) ---------- */
+const segGroups = {};
+function seg(key, name, legend, options, onChange, cls) {
+  const fs = document.createElement('fieldset');
+  fs.className = 'seg' + (cls ? ' ' + cls : '');
+  const lg = document.createElement('legend'); lg.textContent = legend; fs.appendChild(lg);
+  const box = document.createElement('div'); box.className = 'seg__opts'; fs.appendChild(box);
+  const inputs = [];
+  options.forEach((o, i) => {
+    const lab = document.createElement('label');
+    const inp = document.createElement('input');
+    inp.type = 'radio'; inp.name = name; inp.id = name + '-' + i; inp.value = String(i);
+    inp.checked = state[key] === o.value;
+    inp.addEventListener('change', () => { if (inp.checked) { state[key] = o.value; syncShared(key); onChange(); } });
+    const sp = document.createElement('span'); sp.textContent = o.label;
+    lab.appendChild(inp); lab.appendChild(sp); box.appendChild(lab);
+    inputs.push({ inp, value: o.value });
+  });
+  (segGroups[key] = segGroups[key] || []).push(() => inputs.forEach(q => { q.inp.checked = state[key] === q.value; }));
+  return fs;
+}
+function switchCtl(key, id, text, onChange) {
+  const lab = document.createElement('label'); lab.className = 'switch'; lab.htmlFor = id;
+  const inp = document.createElement('input'); inp.type = 'checkbox'; inp.id = id; inp.setAttribute('role', 'switch');
+  const sp = document.createElement('span'); sp.textContent = text;
+  const st = document.createElement('b');
+  const sync = () => { inp.checked = !!state[key]; st.textContent = state[key] ? '켬' : '끔'; };
+  inp.addEventListener('change', () => { state[key] = inp.checked ? 1 : 0; syncShared(key); onChange(); });
+  lab.appendChild(inp); lab.appendChild(sp); lab.appendChild(st);
+  (segGroups[key] = segGroups[key] || []).push(sync);
+  sync();
+  return lab;
+}
+function syncShared(key) { (segGroups[key] || []).forEach(fn => fn()); }
+
+function keyRow(id, items) {
+  const box = $(id);
+  box.textContent = '';
+  items.forEach(([cls, text, glyph]) => {
+    const s = document.createElement('span');
+    const i = document.createElement('i'); i.className = cls; if (glyph) i.textContent = glyph;
+    s.appendChild(i); s.appendChild(document.createTextNode(text));
+    box.appendChild(s);
+  });
+}
+
+/* =====================================================================
+   출발 → 살펴보기 → 이동을 맡는 진행기 (1, 2, 4, 5단계가 함께 쓴다)
+   ===================================================================== */
+function makeRunner(cfg) {
+  const R = {
+    phase: 'ready', data: null, raf: 0, last: 0, acc: 0, rate: 1, clock: 0,
+    panes: cfg.panes.map(p => ({ view: p.view, mode: p.mode, sim: null, departed: false, revealed: false, live: null, dirty: false, shown: 0, arrowLimit: -1, rep: null, total: 0 }))
+  };
+  const layers = p => {
+    const D = R.data;
+    if (p.mode === 'astar') return { heat: p.live || (p.revealed ? D.heatA : null), heatMax: D.heatMax, flatT: D.flatT, paths: (cfg.showPath && p.revealed) ? D : null, arrows: -1 };
+    return { heat: p.live || (p.revealed ? heatF : null), heatMax: D.heatMax, arrows: cfg.arrows ? p.arrowLimit : -1 };
+  };
+  R.stop = () => { if (R.raf) { cancelAnimationFrame(R.raf); R.raf = 0; } };
+  R.paint = full => {
+    for (const p of R.panes) {
+      if (!p.sim) continue;
+      const v = p.view, f = fitView(v);
+      if (!f) continue;
+      if (full || f === 2 || p.live || p.dirty) { paintBase(v, layers(p)); p.dirty = false; }
+      v.ctx.globalAlpha = 1;
+      v.ctx.drawImage(v.base, 0, 0);
+      const S = p.sim;
+      paintUnits(v.ctx, S, p.mode, v.cell, v.dpr, 0, 0, v.canvas.width, v.canvas.height, p.departed && S.arrived < S.N, R.clock);
+    }
+  };
+  R.reset = () => {
+    R.stop();
+    const D = R.data = cfg.data();
+    for (const p of R.panes) {
+      p.sim = makeSim(world, D.start, D.N, 1, p.mode, D.collide, p.mode === 'astar' ? { paths: D.paths } : { fields: [field] });
+      prepSim(p.sim);
+      p.departed = false; p.revealed = false; p.live = null; p.dirty = false; p.shown = 0; p.arrowLimit = -1; p.rep = null;
+      p.total = p.mode === 'astar' ? D.totalA : field.count;
+    }
+    R.phase = 'ready'; R.clock = 0;
+    R.paint(true);
+    cfg.tick(R);
+  };
+  const depart = p => {
+    p.departed = true; p.revealed = true; p.live = null; p.dirty = true;
+    p.arrowLimit = BIG; p.shown = p.total;
+  };
+  /* 살펴본 칸을 1초에 rate칸씩 다시 보여 준다. 다 보여 준 화면부터 유닛이 출발한다. */
+  const replay = (p, dt) => {
+    const D = R.data, rep = p.rep;
+    rep.acc += R.rate * dt;
+    let budget = Math.floor(rep.acc); rep.acc -= budget;
+    const live = p.live;
+    if (p.mode === 'astar') {
+      while (budget > 0) {
+        if (rep.cur >= rep.list.length) {
+          if (rep.unit >= D.N) break;
+          rep.list.length = 0; rep.cur = 0;
+          astar(world.G, D.start.cell[rep.unit], world.goals[0], null, rep.list);
+          rep.unit++;
+          continue;
+        }
+        const take = Math.min(budget, rep.list.length - rep.cur);
+        for (let j = 0; j < take; j++) live[rep.list[rep.cur++]]++;
+        p.shown += take; budget -= take;
+      }
+      if (rep.unit >= D.N && rep.cur >= rep.list.length) depart(p);
+    } else {
+      const order = field.order, take = Math.min(budget, order.length - rep.cur);
+      for (let j = 0; j < take; j++) live[order[rep.cur++]] = 1;
+      p.shown = rep.cur;
+      p.arrowLimit = rep.cur > 0 ? field.dist[order[rep.cur - 1]] : -1;
+      if (rep.cur >= order.length) depart(p);
+    }
+  };
+  const frame = ts => {
+    R.raf = 0;
+    if (!R.last) R.last = ts;
+    let dt = (ts - R.last) / 1000; R.last = ts;
+    if (dt > 0.05) dt = 0.05;
+    R.clock += dt;
+    for (const p of R.panes) if (!p.departed) replay(p, dt);
+    R.acc += dt * state.speed;
+    let steps = Math.floor(R.acc / SIM.DT);
+    R.acc -= steps * SIM.DT;
+    if (steps > 16) steps = 16;
+    let active = false;
+    for (const p of R.panes) {
+      const S = p.sim;
+      if (p.departed) for (let s = 0; s < steps && S.arrived < S.N && S.t < SIM.MAX_T; s++) simStep(S);
+      if (!p.departed || (S.arrived < S.N && S.t < SIM.MAX_T)) active = true;
+    }
+    if (R.phase === 'replay' && R.panes.every(p => p.departed)) R.phase = 'run';
+    R.paint(false);
+    if (!active) R.phase = 'done';
+    cfg.tick(R);
+    if (active) R.raf = requestAnimationFrame(frame);
+  };
+  R.go = () => {
+    if (R.phase === 'done') R.reset();
+    if (R.phase !== 'ready') return;
+    let mx = 40;
+    for (const p of R.panes) if (p.total > mx) mx = p.total;
+    R.rate = mx / cfg.seconds;
+    for (const p of R.panes) { p.live = new Uint32Array(NCELL); p.rep = { unit: 0, list: [], cur: 0, acc: 0 }; }
+    R.phase = 'replay'; R.last = 0; R.acc = 0;
+    cfg.tick(R);
+    R.raf = requestAnimationFrame(frame);
+  };
+  return R;
+}
+function runButtons(R, n) {
+  const go = $('go' + n), rs = $('reset' + n);
+  go.disabled = !(R.phase === 'ready' || R.phase === 'done');
+  go.textContent = R.phase === 'done' ? '다시 출발' : R.phase === 'ready' ? '출발' : '진행 중';
+  rs.disabled = R.phase === 'ready';
+}
+function paneStatus(R, p) {
+  const S = p.sim;
+  if (R.phase === 'ready') return '';
+  if (!p.departed) return '살펴보는 중';
+  if (S.arrived === S.N && S.finishedAt >= 0) return '전원 도착 ' + S.finishedAt.toFixed(2) + '초';
+  if (S.t >= SIM.MAX_T) return '시간 초과';
+  return '이동 중';
+}
+
+/* ---------- 1, 2, 4단계: 지도 한 장 ---------- */
+function soloScene(n, mode, opts) {
+  const view = mkView('cv' + n);
+  const R = makeRunner({
+    panes: [{ view, mode }], data: opts.data, seconds: opts.seconds, showPath: opts.showPath, arrows: opts.arrows,
+    tick: R => { runButtons(R, n); $('st' + n).textContent = paneStatus(R, R.panes[0]); opts.read(R, R.panes[0]); }
+  });
+  $('go' + n).addEventListener('click', R.go);
+  $('reset' + n).addEventListener('click', R.reset);
+  return { enter: R.reset, leave: R.stop, rebuild: R.reset, resize: () => R.paint(false), repaint: () => R.paint(true) };
+}
+
+/* ---------- 5단계: 두 장 나란히 ---------- */
+function dualScene() {
+  const va = mkView('cv5a'), vf = mkView('cv5f');
+  const R = makeRunner({
+    panes: [{ view: va, mode: 'astar' }, { view: vf, mode: 'flow' }], data: getCrowd, seconds: 3.2, showPath: false, arrows: false,
+    tick: R => {
+      runButtons(R, 5);
+      const [a, f] = R.panes, D = R.data, live = R.phase !== 'ready';
+      $('st5a').textContent = paneStatus(R, a); $('st5f').textContent = paneStatus(R, f);
+      setDD('cells5a', live ? fmt(a.shown) : '–', live ? '칸' : '');
+      setDD('cells5f', live ? fmt(f.shown) : '–', live ? '칸' : '');
+      setDD('re5a', fmt(a.sim.replans) + '번', a.sim.extra ? '+' + fmt(a.sim.extra) + '칸' : '');
+      setDD('re5f', '0번', '');
+      setDD('arr5a', fmt(a.sim.arrived), '/ ' + fmt(D.N));
+      setDD('arr5f', fmt(f.sim.arrived), '/ ' + fmt(D.N));
+      let msg = '';
+      if (R.phase === 'done') {
+        const first = D.totalA === field.count ? '두 방식이 동시에 출발했어요.' : D.totalA < field.count ? 'A*가 먼저 출발했어요.' : '플로우 필드가 먼저 출발했어요.';
+        const t = S => S.finishedAt >= 0 ? S.finishedAt.toFixed(2) + '초' : '시간 초과';
+        msg = first + ' 출발한 뒤 전원 도착까지 A*는 ' + t(a.sim) + ', 플로우 필드는 ' + t(f.sim) + ' 걸렸어요.';
+      }
+      $('res5').textContent = msg;
+      if (!live) keyRow('keys5', [['keys__ramp', '칸마다 살펴본 횟수 1번 → ' + fmt(Math.max(D.heatMax, 10)) + '번'], ['dot dot--astar', 'A* 유닛'], ['dot dot--flow', '플로우 필드 유닛']]);
+    }
+  });
+  $('go5').addEventListener('click', R.go);
+  $('reset5').addEventListener('click', R.reset);
+  return { enter: R.reset, leave: R.stop, rebuild: R.reset, resize: () => R.paint(false), repaint: () => R.paint(true) };
+}
+
+/* =====================================================================
+   3단계: 목적지에서 숫자가 퍼지고, 화살표가 생기고, 유닛이 따라간다
+   T(진행): -1 아직 아무것도 없음 → 0 목적지에 0 → Lmax 숫자 끝 → Tend 화살표 끝 → 유닛 이동
+   ===================================================================== */
+function fieldScene() {
+  const view = mkView('cv3');
+  const zc = $('cv3z'), z = { canvas: zc, ctx: zc.getContext('2d'), w: 0, h: 0, s: 1, dpr: 1 };
+  const UNITS3 = 24, PACE = [3, 10, 40], ACROSS = 11;
+  const F = { T: -1, playing: false, manual: false, cx: 0, cy: 0, tx: 0, ty: 0, sim: null, start: null, P: null,
+    raf: 0, last: 0, acc: 0, clock: 0, Lmax: 1, Tend: 1, seed: -1, dragging: false };
+
+  const clampX = x => Math.max(ACROSS / 2, Math.min(MAPW - ACROSS / 2, x));
+  const clampY = y => { const half = (z.h && z.s ? z.h / z.s : ACROSS) / 2; return Math.max(half, Math.min(MAPH - half, y)); };
+  const countLE = v => {
+    let lo = 0, hi = field.count;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (field.dist[field.order[m]] <= v) lo = m + 1; else hi = m; }
+    return lo;
+  };
+  function resetSim() {
+    F.sim = makeSim(world, F.start, UNITS3, 1, 'flow', false, { fields: [field] });
+    prepSim(F.sim); F.acc = 0;
+  }
+  function resetTimeline() {
+    F.T = -1; F.playing = false; F.manual = false;
+    resetSim();
+    const g = field.goal;
+    F.cx = F.tx = clampX((g % MAPW) + 0.5); F.cy = F.ty = clampY(((g / MAPW) | 0) + 0.5);
+  }
+  function setup() {
+    F.seed = state.seed;
+    F.Lmax = dmax / 10; F.Tend = F.Lmax + F.Lmax / 4;
+    F.start = startPositions(world, UNITS3, false);
+    // 유닛 무리 한가운데에서 화살표를 따라 목적지까지 간 길. 확대 창이 이 길을 따라 움직인다.
+    let sx = 0, sy = 0;
+    for (let i = 0; i < UNITS3; i++) { sx += F.start.x[i]; sy += F.start.y[i]; }
+    sx /= UNITS3; sy /= UNITS3;
+    let c0 = F.start.cell[0], best = Infinity;
+    for (let i = 0; i < UNITS3; i++) {
+      const dx = F.start.x[i] - sx, dy = F.start.y[i] - sy, d = dx * dx + dy * dy;
+      if (d < best) { best = d; c0 = F.start.cell[i]; }
+    }
+    F.P = [];
+    for (let c = c0; c !== field.goal && F.P.length < NCELL;) { F.P.push(c); const d = field.dir[c]; c += DX[d] + DY[d] * MAPW; }
+    F.P.push(field.goal);
+    resetTimeline();
+  }
+  function fitZoom() {
+    const rect = zc.getBoundingClientRect();
+    if (rect.width < 2) return false;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.round(rect.width * dpr), h = Math.round(rect.height * dpr);
+    if (zc.width !== w || zc.height !== h) { zc.width = w; zc.height = h; }
+    z.w = w; z.h = h; z.dpr = dpr; z.s = w / ACROSS;
+    return true;
+  }
+  function aim() {
+    if (F.manual) return;
+    let tx, ty;
+    const S = F.sim;
+    if (F.T >= F.Tend && S.steps > 0 && S.arrived < S.N) {       // 유닛 무리를 따라간다
+      let sx = 0, sy = 0, n = 0;
+      for (let i = 0; i < S.N; i++) if (S.alive[i]) { sx += S.x[i]; sy += S.y[i]; n++; }
+      tx = sx / n; ty = sy / n;
+    } else if (F.T >= F.Tend && S.arrived === S.N) {
+      tx = (field.goal % MAPW) + 0.5; ty = ((field.goal / MAPW) | 0) + 0.5;
+    } else {
+      // 숫자가 퍼지는 앞머리보다 조금 뒤(목적지 쪽)를 본다
+      const want = Math.max(0, Math.min(F.T, F.Lmax) - 2.5) * 10;
+      let c = F.P[0];
+      for (let i = F.P.length - 1; i >= 0; i--) if (field.dist[F.P[i]] >= want) { c = F.P[i]; break; }
+      tx = (c % MAPW) + 0.5; ty = ((c / MAPW) | 0) + 0.5;
+    }
+    F.tx = clampX(tx); F.ty = clampY(ty);
+  }
+
+  function paintZoom(num10, arr10, fresh) {
+    const c = z.ctx, s = z.s, dpr = z.dpr, game = !!state.game, walls = world.G.walls, dist = field.dist, dir = field.dir;
+    const cols = z.w / s, rows = z.h / s, x0 = F.cx - cols / 2, y0 = F.cy - rows / 2;
+    c.globalAlpha = 1; c.imageSmoothingEnabled = false;
+    c.fillStyle = T.paperCss; c.fillRect(0, 0, z.w, z.h);
+    const xa = Math.max(0, Math.floor(x0)), xb = Math.min(MAPW - 1, Math.floor(x0 + cols));
+    const ya = Math.max(0, Math.floor(y0)), yb = Math.min(MAPH - 1, Math.floor(y0 + rows));
+    const band = 10 * Math.max(2, Math.round(MAPW / 20));
+    const X = x => Math.round((x - x0) * s), Y = y => Math.round((y - y0) * s);
+    for (let y = ya; y <= yb; y++) for (let x = xa; x <= xb; x++) {
+      const px = X(x), py = Y(y), w = X(x + 1) - px, h = Y(y + 1) - py, i = y * MAPW + x;
+      drawTile(c, x, y, px, py, w, h, game);
+      if (walls[i] || dist[i] > num10) continue;
+      const d = dist[i], odd = ((d / band) | 0) & 1;
+      if (fresh && d > num10 - 10) c.fillStyle = game ? cssRgb(GM.fresh, 0.9) : cssRgb(T.heat2, 0.92);
+      else if (game) c.fillStyle = cssRgb(GM.veil, odd ? 0.76 : 0.66);
+      else c.fillStyle = cssRgb(T.ink, odd ? 0.1 : 0.05);
+      c.fillRect(px, py, w, h);
+    }
+    c.beginPath();                                    // 모눈 선
+    for (let x = xa; x <= xb + 1; x++) { const px = X(x) + 0.5; c.moveTo(px, Y(ya)); c.lineTo(px, Y(yb + 1)); }
+    for (let y = ya; y <= yb + 1; y++) { const py = Y(y) + 0.5; c.moveTo(X(xa), py); c.lineTo(X(xb + 1), py); }
+    c.strokeStyle = game ? 'rgba(22,32,42,0.18)' : T.gridLine2; c.lineWidth = 1; c.stroke();
+
+    const CA = -0.848, SA = 0.53;                      // 화살표
+    c.beginPath();
+    for (let y = ya; y <= yb; y++) for (let x = xa; x <= xb; x++) {
+      const i = y * MAPW + x, d = dir[i];
+      if (d < 0 || dist[i] > arr10) continue;
+      const inv = (d & 1) ? 0.7071 : 1, ux = DX[d] * inv, uy = DY[d] * inv;
+      const cx = (x + 0.5 - x0) * s, cy = (y + 0.7 - y0) * s, L = 0.2 * s, hl = L * 0.85;
+      const x1 = cx + ux * L, y1 = cy + uy * L;
+      c.moveTo(cx - ux * L, cy - uy * L); c.lineTo(x1, y1);
+      c.moveTo(x1 + (ux * CA - uy * SA) * hl, y1 + (ux * SA + uy * CA) * hl); c.lineTo(x1, y1);
+      c.lineTo(x1 + (ux * CA + uy * SA) * hl, y1 + (-ux * SA + uy * CA) * hl);
+    }
+    c.strokeStyle = game ? GM.arrow : T.ink2Css; c.lineWidth = Math.max(1.5, s * 0.055); c.lineJoin = 'round'; c.lineCap = 'round';
+    c.stroke();
+
+    c.font = '500 ' + Math.round(s * 0.31) + 'px ' + T.mono;   // 숫자
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillStyle = game ? GM.ink : T.inkCss;
+    for (let y = ya; y <= yb; y++) for (let x = xa; x <= xb; x++) {
+      const i = y * MAPW + x;
+      if (walls[i] || dist[i] > num10) continue;
+      const withArrow = dir[i] >= 0 && dist[i] <= arr10;
+      c.fillText(fmtDist(dist[i]), (x + 0.5 - x0) * s, (y + (withArrow ? 0.3 : 0.5) - y0) * s);
+    }
+    const g = field.goal, gx = g % MAPW, gy = (g / MAPW) | 0;   // 목적지 칸
+    if (gx >= xa && gx <= xb && gy >= ya && gy <= yb) {
+      const px = X(gx), py = Y(gy), w = X(gx + 1) - px, h = Y(gy + 1) - py, lw = Math.max(2, Math.round(s * 0.08));
+      c.lineJoin = 'miter'; c.lineWidth = lw; c.strokeStyle = game ? GM.outline : T.inkCss;
+      c.strokeRect(px + lw / 2, py + lw / 2, w - lw, h - lw);
+      if (game) drawGoal(c, px + w * 0.76, py + h * 0.46, s, dpr, true, Math.round(s * 0.36));
+    }
+    const S = F.sim;
+    paintUnits(c, S, 'flow', s, dpr, -x0 * s, -y0 * s, z.w, z.h, F.T >= F.Tend && S.steps > 0 && S.arrived < S.N, F.clock, 0.55);
+  }
+
+  function paint() {
+    const f = fitView(view);
+    if (!f || !fitZoom()) return;
+    const num = Math.min(F.T, F.Lmax);
+    const arr10 = F.T >= F.Tend ? BIG : F.T > F.Lmax ? (F.T - F.Lmax) * 4 * 10 : -1;
+    const fresh = F.T < F.Lmax;
+    const cols = z.w / z.s, rows = z.h / z.s;
+    paintBase(view, {
+      reveal: F.T >= 0 ? { level10: num * 10, fresh } : null, arrows: arr10,
+      zoomRect: { x: F.cx - cols / 2, y: F.cy - rows / 2, w: cols, h: rows }
+    });
+    view.ctx.globalAlpha = 1;
+    view.ctx.drawImage(view.base, 0, 0);
+    const S = F.sim;
+    paintUnits(view.ctx, S, 'flow', view.cell, view.dpr, 0, 0, view.canvas.width, view.canvas.height, F.T >= F.Tend && S.steps > 0 && S.arrived < S.N, F.clock);
+    paintZoom(F.T >= 0 ? num * 10 : -1, arr10, fresh);
+  }
+
+  function updateUi() {
+    const S = F.sim, finished = F.T >= F.Tend && S.arrived === S.N;
+    $('play3').textContent = F.playing ? '멈춤' : finished ? '다시 보기' : '재생';
+    const ring = $('ring3');
+    ring.disabled = F.T >= F.Tend;
+    ring.textContent = F.T < F.Lmax ? '한 겹 더' : '화살표 다 그리기';
+    $('reset3').disabled = F.T < 0 && !F.playing;
+    $('follow3').hidden = !F.manual;
+    if (!F.dragging) $('bar3').value = String(Math.round((F.T + 1) / (F.Tend + 1) * 1000));
+    const scene = F.T < 0 ? -1 : F.T < 1 ? 0 : F.T < F.Lmax ? 1 : F.T < F.Tend ? 2 : 3;
+    Array.prototype.forEach.call($('scenes3').children, (li, i) => {
+      li.classList.toggle('is-on', i === scene); li.classList.toggle('is-done', i < scene);
+      if (i === scene) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current');
+    });
+    const num10 = F.T >= 0 ? Math.min(F.T, F.Lmax) * 10 : -1, n = num10 >= 0 ? countLE(num10) : 0;
+    setDD('num3', fmt(n), '/ ' + fmt(field.count));
+    setDD('far3', n > 0 ? fmtDist(field.dist[field.order[n - 1]]) : '–', '');
+    $('res3').textContent = F.T >= F.Lmax ? '모든 빈칸 ' + fmt(field.count) + '칸에 숫자를 한 번씩 매겼어요. 이 수가 플로우 필드가 살펴본 칸이에요.' : '';
+  }
+
+  function frame(ts) {
+    F.raf = 0;
+    if (!F.last) F.last = ts;
+    let dt = (ts - F.last) / 1000; F.last = ts;
+    if (dt > 0.05) dt = 0.05;
+    F.clock += dt;
+    let busy = false;
+    if (F.playing && F.T < F.Tend) {
+      let rate = PACE[state.pace];
+      if (F.T < 6) rate *= 0.3;                     // 처음 몇 겹은 천천히
+      F.T = Math.min(F.Tend, F.T + rate * dt);
+      busy = true;
+    } else if (F.playing) {
+      const S = F.sim;
+      F.acc += dt;
+      let steps = Math.floor(F.acc / SIM.DT);
+      F.acc -= steps * SIM.DT;
+      if (steps > 8) steps = 8;
+      for (let s = 0; s < steps && S.arrived < S.N; s++) simStep(S);
+      if (S.arrived < S.N) busy = true; else F.playing = false;
+    }
+    aim();
+    const k = 1 - Math.exp(-dt * 5), ex = F.tx - F.cx, ey = F.ty - F.cy;
+    if (Math.abs(ex) + Math.abs(ey) > 0.01) { F.cx += ex * k; F.cy += ey * k; busy = true; } else { F.cx = F.tx; F.cy = F.ty; }
+    paint();
+    updateUi();
+    if (busy) F.raf = requestAnimationFrame(frame);
+  }
+  const kick = () => { if (!F.raf) { F.last = 0; F.raf = requestAnimationFrame(frame); } };
+  const stop = () => { if (F.raf) { cancelAnimationFrame(F.raf); F.raf = 0; } F.playing = false; };
+
+  $('play3').addEventListener('click', () => {
+    const S = F.sim;
+    if (F.T >= F.Tend && S.arrived === S.N) resetTimeline();
+    F.playing = !F.playing;
+    updateUi(); kick();
+  });
+  $('ring3').addEventListener('click', () => {
+    F.playing = false;
+    if (F.T < F.Lmax) F.T = Math.min(F.Lmax, Math.floor(F.T + 1e-6) + 1);
+    else F.T = F.Tend;
+    updateUi(); kick();
+  });
+  $('reset3').addEventListener('click', () => { resetTimeline(); updateUi(); kick(); });
+  $('follow3').addEventListener('click', () => { F.manual = false; updateUi(); kick(); });
+  const bar = $('bar3');
+  bar.addEventListener('input', () => {
+    F.dragging = true; F.playing = false;
+    F.T = -1 + Number(bar.value) / 1000 * (F.Tend + 1);
+    if (F.sim.steps > 0) resetSim();
+    updateUi(); kick();
+  });
+  bar.addEventListener('change', () => { F.dragging = false; });
+  bar.addEventListener('pointerup', () => { F.dragging = false; });
+  let drag = false;
+  const pick = ev => {
+    const r = view.canvas.getBoundingClientRect();
+    F.manual = true;
+    F.tx = clampX((ev.clientX - r.left) / r.width * MAPW); F.ty = clampY((ev.clientY - r.top) / r.height * MAPH);
+    updateUi(); kick();
+  };
+  view.canvas.addEventListener('pointerdown', ev => { drag = true; pick(ev); });
+  view.canvas.addEventListener('pointermove', ev => { if (drag && ev.buttons) pick(ev); });
+  window.addEventListener('pointerup', () => { drag = false; });
+
+  const pace = seg('pace', 'pace3', '빠르기', [{ value: 0, label: '느리게' }, { value: 1, label: '보통' }, { value: 2, label: '빠르게' }], () => {}, 'seg--text');
+  $('pace3').appendChild(pace);
+
+  return {
+    enter() { if (F.seed !== state.seed || !F.sim) setup(); else { F.playing = false; } paint(); updateUi(); },
+    leave: stop,
+    rebuild() { stop(); setup(); paint(); updateUi(); },
+    resize() { if (!F.raf) { F.cy = F.ty = clampY(F.cy); paint(); } },
+    repaint() { if (!F.raf) paint(); }
+  };
+}
+
+/* =====================================================================
+   자동 측정
+   ===================================================================== */
+function measureStatic(W, H, ratio, N, k) {
+  const w = buildWorld(W, H, ratio, state.seed);
+  const st = startPositions(w, N, false);
+  const a = computeAStarAll(w, st, N, k, null, false);
+  const f = computeFlowAll(w, N, k, null);
+  const tA = timeIt(() => computeAStarAll(w, st, N, k, null, true), 60, 10, 3);
+  const tF = timeIt(() => computeFlowAll(w, N, k, null), 60, 10, 3);
+  return { cellsA: a.total, cellsF: f.total, msA: tA, msF: tF };
+}
+function measureCollide(N) {
+  const w = buildWorld(80, 50, 0.2, state.seed);
+  const st = startPositions(w, N, true);
+  const a = computeAStarAll(w, st, N, 1, null, true);
+  const f = computeFlowAll(w, N, 1, null);
+  const SA = runToEnd(makeSim(w, st, N, 1, 'astar', true, a));
+  const SF = runToEnd(makeSim(w, st, N, 1, 'flow', true, f));
+  return {
+    cellsA0: a.total, cellsF0: f.total, replans: SA.replans, extra: SA.extra,
+    tA: SA.finishedAt >= 0 ? SA.finishedAt : NaN, tF: SF.finishedAt >= 0 ? SF.finishedAt : NaN
+  };
+}
+/* 유닛을 한 개씩 늘릴 때 A*가 살펴본 칸의 합이 플로우 필드를 처음 넘는 유닛 수 */
+function crossover() {
+  const w = buildWorld(80, 50, 0.2, state.seed);
+  const st = startPositions(w, SIM.MAX_UNITS, false);
+  const F = computeFlowAll(w, 1, 1, null).total;
+  let sum = 0;
+  for (let i = 0; i < SIM.MAX_UNITS; i++) {
+    astar(w.G, st.cell[i], w.goals[0], null, null);
+    sum += w.G.lastExplored;
+    if (sum > F) return i + 1;
+  }
+  return -1;
+}
+
+const EXPS = [
+  {
+    key: 'units', tab: '실험 1 · 유닛 수',
+    vary: '유닛 수 1, 10, 50, 100, 500, 1000개', fixed: '맵 80×50 · 장애물 20% · 목적지 1개 · 충돌 끔',
+    aim: '두 방식이 역전되는 유닛 수를 찾아요.',
+    xName: '유닛 수', levels: UNIT_LEVELS, x: v => v, xl: v => fmt(v),
+    run: v => measureStatic(80, 50, 0.2, v, 1), after: () => ({ cross: crossover() })
+  },
+  {
+    key: 'size', tab: '실험 2 · 맵 크기',
+    vary: '맵 크기 40×25, 80×50, 160×100 (칸 수가 4배씩)', fixed: '유닛 100개 · 장애물 20% · 목적지 1개 · 충돌 끔',
+    aim: '맵이 커질 때 두 방식의 부담이 얼마나 늘어나는지 봐요.',
+    xName: '맵 크기', levels: [[40, 25], [80, 50], [160, 100]], x: v => v[0] * v[1], xl: v => v[0] + '×' + v[1],
+    run: v => measureStatic(v[0], v[1], 0.2, 100, 1)
+  },
+  {
+    key: 'goals', tab: '실험 3 · 목적지 수',
+    vary: '목적지 수 1, 2, 4, 8개 (유닛을 같은 수로 나눠 보냄)', fixed: '맵 80×50 · 유닛 500개 · 장애물 20% · 충돌 끔',
+    aim: '목적지가 늘어날 때 플로우 필드의 부담이 얼마나 커지는지 봐요.',
+    xName: '목적지 수', levels: GOAL_LEVELS, x: v => v, xl: v => String(v),
+    run: v => measureStatic(80, 50, 0.2, 500, v)
+  },
+  {
+    key: 'collide', tab: '실험 4 · 충돌',
+    vary: '유닛 수 50, 100, 500, 1000개', fixed: '맵 80×50 · 장애물 20% · 목적지 1개 · 충돌 켬',
+    aim: '유닛끼리 밀칠 때 A*가 길을 얼마나 다시 찾는지, 전원 도착까지 얼마나 걸리는지 봐요.',
+    xName: '유닛 수', levels: [50, 100, 500, 1000], x: v => v, xl: v => fmt(v),
+    run: v => measureCollide(v), collide: true
+  }
+];
+const results = {};
+let busyExp = false, chartHostW = 0, chartTimer = 0;
+const nextFrame = () => new Promise(res => requestAnimationFrame(() => setTimeout(res, 0)));
+
+async function runExp(idx) {
+  if (busyExp) return;
+  busyExp = true;
+  const E = EXPS[idx], seed = state.seed, rows = [];
+  renderExp();
+  for (let i = 0; i < E.levels.length; i++) {
+    setExpStatus(idx, E.xName + ' ' + E.xl(E.levels[i]) + ' 측정 중 (' + (i + 1) + '/' + E.levels.length + ')');
+    await nextFrame();
+    if (state.seed !== seed) break;
+    rows.push(E.run(E.levels[i]));
+  }
+  if (rows.length === E.levels.length) {
+    const extra = E.after ? E.after() : {};
+    results[E.key] = Object.assign({ seed, rows }, extra);
+  }
+  busyExp = false;
+  renderExp();
+}
+function setExpStatus(idx, text) {
+  if (state.tab !== idx) return;
+  const s = $('expStatus'); if (s) s.textContent = text;
+}
+
+function hEl(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function expSummary(E, R) {
+  const rows = R.rows, first = rows[0], lastR = rows[rows.length - 1];
+  if (E.key === 'units') {
+    const tail = ' 유닛 1000개일 때는 A*가 ' + fmtRatio(lastR.cellsA / lastR.cellsF) + '배 많이 살펴봐요.';
+    if (R.cross > 0) return '이 맵에서는 유닛이 ' + fmt(R.cross) + '개가 되는 순간부터 A*가 살펴본 칸이 플로우 필드보다 많아져요.' + tail;
+    return '이 맵에서는 유닛 1000개까지 A*가 살펴본 칸이 플로우 필드보다 적어요.';
+  }
+  if (E.key === 'size') {
+    return '맵의 칸 수가 16배가 되는 동안 살펴본 칸은 A*가 ' + fmtRatio(lastR.cellsA / first.cellsA) + '배, 플로우 필드가 ' +
+      fmtRatio(lastR.cellsF / first.cellsF) + '배로 늘었어요.';
+  }
+  if (E.key === 'goals') {
+    return '목적지가 1개에서 8개로 늘자 플로우 필드가 살펴본 칸은 ' + fmtRatio(lastR.cellsF / first.cellsF) + '배가 됐고, A*는 ' +
+      fmtRatio(lastR.cellsA / first.cellsA) + '배가 됐어요. 그래도 8개일 때 A*가 ' + fmtRatio(lastR.cellsA / lastR.cellsF) + '배 많아요.';
+  }
+  const t = v => isFinite(v) ? v.toFixed(2) + '초' : '시간 초과';
+  return '유닛 1000개일 때 A* 유닛은 이동하면서 길을 ' + fmt(lastR.replans) + '번 다시 찾았고, 그때 ' + fmt(lastR.extra) +
+    '칸을 더 살펴봤어요. 전원 도착은 A*가 ' + t(lastR.tA) + ', 플로우 필드가 ' + t(lastR.tF) + '였어요.';
+}
+
+function expTable(E, R) {
+  let head, body;
+  if (E.collide) {
+    head = [E.xName, 'A* 출발 때 살펴본 칸', 'A* 길 다시 찾기(번)', 'A* 이동 중 더 살펴본 칸', '플로우 필드 살펴본 칸', 'A* 전원 도착(초)', '플로우 필드 전원 도착(초)'];
+    body = R.rows.map((r, i) => [E.xl(E.levels[i]), fmt(r.cellsA0), fmt(r.replans), fmt(r.extra), fmt(r.cellsF0),
+      isFinite(r.tA) ? r.tA.toFixed(2) : '시간 초과', isFinite(r.tF) ? r.tF.toFixed(2) : '시간 초과']);
+  } else {
+    head = [E.xName, 'A* 살펴본 칸', '플로우 필드 살펴본 칸', '칸 수 비 (A* ÷ 플로우 필드)', 'A* 시간(ms)', '플로우 필드 시간(ms)', '시간 비 (A* ÷ 플로우 필드)'];
+    body = R.rows.map((r, i) => [E.xl(E.levels[i]), fmt(r.cellsA), fmt(r.cellsF), fmtRatio(r.cellsA / r.cellsF),
+      fmtMs(r.msA), fmtMs(r.msF), r.msF > 0 ? fmtRatio(r.msA / r.msF) : '–']);
+  }
+  return { head, body };
+}
+
+function renderExp() {
+  const E = EXPS[state.tab], R = results[E.key], host = $('exp');
+  host.textContent = '';
+  host.setAttribute('aria-labelledby', 'tab-' + state.tab);
+
+  const spec = hEl('dl', 'exp__spec');
+  [['바꾸는 값', E.vary], ['고정하는 값', E.fixed], ['알아볼 것', E.aim]].forEach(([k, v]) => {
+    spec.appendChild(hEl('dt', null, k)); spec.appendChild(hEl('dd', null, v));
+  });
+  host.appendChild(spec);
+
+  const run = hEl('div', 'exp__run');
+  const btn = hEl('button', 'btn', R ? '다시 측정' : '측정 시작');
+  btn.type = 'button'; btn.id = 'expRun'; btn.disabled = busyExp;
+  btn.addEventListener('click', () => runExp(state.tab));
+  run.appendChild(btn);
+  const st = hEl('span', 'exp__status'); st.id = 'expStatus';
+  st.setAttribute('role', 'status');
+  if (busyExp) st.textContent = '측정 중';
+  else if (R) st.textContent = '맵 번호 ' + R.seed + '에서 측정함' + (R.seed !== state.seed ? ' · 지금 맵 번호(' + state.seed + ')와 달라요. 다시 측정하면 지금 맵으로 재요.' : '');
+  run.appendChild(st);
+  host.appendChild(run);
+
+  if (!R) {
+    host.appendChild(hEl('p', 'exp__empty', busyExp ? '재는 동안 화면이 잠깐씩 멈출 수 있어요.' : '아직 재지 않았어요. 측정 시작을 누르면 그래프와 표가 여기에 나와요.'));
+    return;
+  }
+  host.appendChild(hEl('p', 'exp__summary', expSummary(E, R)));
+
+  const logLab = hEl('label', 'check'); logLab.htmlFor = 'logScale';
+  const logInp = document.createElement('input'); logInp.type = 'checkbox'; logInp.id = 'logScale'; logInp.checked = state.log;
+  logInp.addEventListener('change', () => { state.log = logInp.checked; renderExp(); });
+  logLab.appendChild(logInp); logLab.appendChild(document.createTextNode(' 로그 눈금으로 보기 (10배마다 한 칸)'));
+  host.appendChild(logLab);
+
+  const xs = E.levels.map(E.x), xls = E.levels.map(E.xl);
+  const charts = hEl('div', 'charts');
+  host.appendChild(charts);
+  const hostW = host.clientWidth || 900;
+  chartHostW = hostW;
+  const cols = hostW >= 640 ? 2 : 1;
+  charts.style.gridTemplateColumns = 'repeat(' + cols + ', minmax(0, 1fr))';
+  const VW = Math.max(280, Math.min(600, Math.round((hostW - 22 * (cols - 1)) / cols)));
+  const VH = Math.max(230, Math.min(300, Math.round(VW * 0.56)));
+  if (E.collide) {
+    lineChart(charts, { title: '살펴본 칸 수 (출발 때 + 이동 중)', xName: E.xName, xs, xls, kind: 'cells', log: state.log,
+      series: [{ name: 'A*', cls: 'astar', values: R.rows.map(r => r.cellsA0 + r.extra) }, { name: '플로우 필드', cls: 'flow', values: R.rows.map(r => r.cellsF0) }] }, VW, VH);
+    lineChart(charts, { title: '전원 도착까지 걸린 시간 (초)', xName: E.xName, xs, xls, kind: 'sec', log: state.log,
+      series: [{ name: 'A*', cls: 'astar', values: R.rows.map(r => isFinite(r.tA) ? r.tA : SIM.MAX_T) }, { name: '플로우 필드', cls: 'flow', values: R.rows.map(r => isFinite(r.tF) ? r.tF : SIM.MAX_T) }] }, VW, VH);
+  } else {
+    lineChart(charts, { title: '살펴본 칸 수', xName: E.xName, xs, xls, kind: 'cells', log: state.log,
+      series: [{ name: 'A*', cls: 'astar', values: R.rows.map(r => r.cellsA) }, { name: '플로우 필드', cls: 'flow', values: R.rows.map(r => r.cellsF) }] }, VW, VH);
+    lineChart(charts, { title: '계산 시간 (ms)', xName: E.xName, xs, xls, kind: 'ms', log: state.log,
+      series: [{ name: 'A*', cls: 'astar', values: R.rows.map(r => r.msA) }, { name: '플로우 필드', cls: 'flow', values: R.rows.map(r => r.msF) }] }, VW, VH);
+  }
+
+  const { head, body } = expTable(E, R);
+  const wrap = hEl('div', 'tablewrap'), table = document.createElement('table');
+  const thead = document.createElement('thead'), trh = document.createElement('tr');
+  head.forEach(t => { const th = hEl('th', null, t); th.scope = 'col'; trh.appendChild(th); });
+  thead.appendChild(trh); table.appendChild(thead);
+  const tb = document.createElement('tbody');
+  body.forEach(row => { const tr = document.createElement('tr'); row.forEach(t => tr.appendChild(hEl('td', null, t))); tb.appendChild(tr); });
+  table.appendChild(tb); wrap.appendChild(table); host.appendChild(wrap);
+
+  const copyRow = hEl('div', 'exp__run');
+  const copy = hEl('button', 'btn', '표 복사'); copy.type = 'button';
+  const copied = hEl('span', 'exp__status'); copied.setAttribute('role', 'status');
+  copyRow.appendChild(copy); copyRow.appendChild(copied); host.appendChild(copyRow);
+  copy.addEventListener('click', () => {
+    const tsv = [head].concat(body).map(r => r.map(c => String(c).replace(/,/g, '')).join('\t')).join('\n');
+    const fallback = () => {
+      let box = $('copyBox');
+      if (!box) { box = document.createElement('textarea'); box.id = 'copyBox'; box.className = 'copybox'; box.readOnly = true; box.setAttribute('aria-label', '복사할 표 내용'); host.appendChild(box); }
+      box.value = tsv; box.focus(); box.select();
+      copied.textContent = '자동 복사가 막혀 있어요. 아래 내용을 직접 복사하세요.';
+    };
+    try {
+      navigator.clipboard.writeText(tsv).then(() => { copied.textContent = '복사했어요. 스프레드시트에 붙여 넣으면 칸이 나뉘어요.'; }, fallback);
+    } catch (e) { fallback(); }
+  });
+}
+
+/* ---------- 꺾은선 그래프 ---------- */
+const SVGNS = 'http://www.w3.org/2000/svg';
+function sv(name, attrs, parent, text) {
+  const e = document.createElementNS(SVGNS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function niceTicks(max, n) {
+  if (!(max > 0)) return { step: 1, ticks: [0, 1] };
+  const raw = max / n, mag = Math.pow(10, Math.floor(Math.log10(raw))), norm = raw / mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  const ticks = [];
+  for (let i = 0; i * step < max + step * 0.999; i++) ticks.push(i * step);
+  return { step, ticks };
+}
+function fmtTick(v, kind, top, step, log) {
+  if (v === 0) return '0';
+  if (kind === 'cells') {
+    if (log ? v >= 10000 : top >= 10000) return (v / 10000).toLocaleString('ko-KR', { maximumFractionDigits: 2 }) + '만';
+    return fmt(v);
+  }
+  if (log) return v >= 1 ? fmt(v) : String(Number(v.toPrecision(1)));
+  const dec = step >= 1 ? 0 : Math.min(4, Math.ceil(-Math.log10(step) - 1e-9));
+  return v.toFixed(dec);
+}
+function fmtVal(v, kind) {
+  return kind === 'cells' ? fmt(v) + '칸' : kind === 'ms' ? fmtMs(v) + ' ms' : v.toFixed(2) + '초';
+}
+
+function lineChart(host, cfg, VW, VH) {
+  const endLabels = VW >= 380;
+  const m = { l: 54, r: endLabels ? 92 : 20, t: 12, b: 48 };
+  const pw = VW - m.l - m.r, ph = VH - m.t - m.b;
+  const xs = cfg.xs, nPts = xs.length;
+  const all = [].concat.apply([], cfg.series.map(s => s.values));
+  const vmax = Math.max.apply(null, all);
+  const pos = all.filter(v => v > 0);
+  const vmin = pos.length ? Math.min.apply(null, pos) : 1;
+
+  let sx, sy, yt, step = 1, top;
+  if (cfg.log) {
+    const l0 = Math.log10(xs[0]), l1 = Math.log10(xs[nPts - 1]);
+    sx = v => m.l + (l1 === l0 ? 0.5 : (Math.log10(v) - l0) / (l1 - l0)) * pw;
+    let e0 = Math.floor(Math.log10(vmin) + 1e-9), e1 = Math.ceil(Math.log10(Math.max(vmax, vmin)) - 1e-9);
+    if (e1 <= e0) e1 = e0 + 1;
+    sy = v => m.t + ph - ((Math.log10(Math.max(v, Math.pow(10, e0))) - e0) / (e1 - e0)) * ph;
+    yt = []; for (let e = e0; e <= e1; e++) yt.push(Math.pow(10, e));
+    top = Math.pow(10, e1);
+  } else {
+    const xmax = xs[nPts - 1];
+    sx = v => m.l + (v / xmax) * pw;
+    const nt = niceTicks(vmax, 4); yt = nt.ticks; step = nt.step; top = yt[yt.length - 1];
+    sy = v => m.t + ph - (v / top) * ph;
+  }
+
+  const box = hEl('figure', 'chart');
+  box.appendChild(hEl('figcaption', 'chart__title', cfg.title));
+  const legend = hEl('div', 'chart__legend');
+  cfg.series.forEach(s => { const sp = document.createElement('span'); const i = hEl('i', 'k-' + s.cls); sp.appendChild(i); sp.appendChild(document.createTextNode(s.name)); legend.appendChild(sp); });
+  box.appendChild(legend);
+
+  const lastI = nPts - 1;
+  const svg = sv('svg', { viewBox: '0 0 ' + VW + ' ' + VH, role: 'img', tabindex: '0',
+    'aria-label': cfg.title + '. ' + cfg.xName + ' ' + cfg.xls[lastI] + '에서 ' + cfg.series.map(s => s.name + ' ' + fmtVal(s.values[lastI], cfg.kind)).join(', ') + '. 좌우 화살표 키로 값을 볼 수 있어요.' });
+  yt.forEach(v => {
+    const y = Math.round(sy(v)) + 0.5;
+    sv('line', { class: v === yt[0] ? 'c-axis' : 'c-grid', x1: m.l, x2: m.l + pw, y1: y, y2: y }, svg);
+    sv('text', { x: m.l - 8, y: y + 4, 'text-anchor': 'end' }, svg, fmtTick(v, cfg.kind, top, step, cfg.log));
+  });
+  // 가로축 눈금: 글자가 겹치면 건너뛴다(마지막 값은 항상 표시)
+  const baseY = m.t + ph;
+  const shown = [];
+  for (let i = 0; i < nPts; i++) {
+    const x = sx(xs[i]);
+    sv('line', { class: 'c-axis', x1: x, x2: x, y1: baseY, y2: baseY + 4 }, svg);
+    const w = cfg.xls[i].length * 6.8 + 10;
+    shown.push({ i, x, w });
+  }
+  const keep = [];
+  for (let j = shown.length - 1; j >= 0; j--) {
+    const s = shown[j], prev = keep[keep.length - 1];
+    if (!prev || prev.x - s.x >= (prev.w + s.w) / 2) keep.push(s);
+  }
+  keep.forEach(s => sv('text', { x: s.x, y: baseY + 18, 'text-anchor': 'middle' }, svg, cfg.xls[s.i]));
+  sv('text', { class: 'c-xlabel', x: m.l + pw / 2, y: VH - 6, 'text-anchor': 'middle' }, svg, cfg.xName);
+
+  const cross = sv('line', { class: 'c-cross', x1: 0, x2: 0, y1: m.t, y2: baseY }, svg);
+  const dots = [];
+  cfg.series.forEach(s => {
+    const pts = s.values.map((v, i) => sx(xs[i]).toFixed(1) + ',' + sy(v).toFixed(1)).join(' ');
+    sv('polyline', { class: 'c-line c-' + s.cls, points: pts }, svg);
+  });
+  cfg.series.forEach(s => {
+    dots.push(s.values.map((v, i) => sv('circle', { class: 'c-dot c-' + s.cls, cx: sx(xs[i]).toFixed(1), cy: sy(v).toFixed(1), r: 4 }, svg)));
+  });
+  const ends = cfg.series.map(s => sy(s.values[lastI]));
+  if (endLabels && (cfg.series.length < 2 || Math.abs(ends[0] - ends[1]) >= 15)) {
+    cfg.series.forEach((s, k) => sv('text', { class: 'c-end', x: sx(xs[lastI]) + 10, y: ends[k] + 4 }, svg, s.name));
+  }
+  box.appendChild(svg);
+
+  const tip = hEl('div', 'tip');
+  box.appendChild(tip);
+  let cur = -1;
+  const show = i => {
+    if (i === cur) return;
+    cur = i;
+    dots.forEach(row => row.forEach((d, j) => d.setAttribute('r', j === i ? 5.5 : 4)));
+    if (i < 0) { cross.style.opacity = 0; tip.style.opacity = 0; return; }
+    const x = sx(xs[i]);
+    cross.setAttribute('x1', x); cross.setAttribute('x2', x); cross.style.opacity = 0.5;
+    tip.textContent = '';
+    tip.appendChild(hEl('div', 'tip__x', cfg.xName + ' ' + cfg.xls[i]));
+    cfg.series.forEach(s => {
+      const row = hEl('div', 'tip__row');
+      row.appendChild(hEl('i', 'k-' + s.cls));
+      row.appendChild(hEl('b', null, fmtVal(s.values[i], cfg.kind)));
+      row.appendChild(hEl('span', null, s.name));
+      tip.appendChild(row);
+    });
+    const br = box.getBoundingClientRect(), sr = svg.getBoundingClientRect();
+    const scale = sr.width / VW;
+    const flipSide = x > m.l + pw * 0.5;
+    tip.style.left = (sr.left - br.left + x * scale) + 'px';
+    tip.style.top = (sr.top - br.top + m.t * scale + 4) + 'px';
+    tip.style.transform = flipSide ? 'translateX(calc(-100% - 12px))' : 'translateX(12px)';
+    tip.style.opacity = 1;
+  };
+  const nearest = ev => {
+    const r = svg.getBoundingClientRect();
+    const mx = (ev.clientX - r.left) * VW / r.width;
+    let bi = 0, bd = Infinity;
+    for (let i = 0; i < nPts; i++) { const d = Math.abs(sx(xs[i]) - mx); if (d < bd) { bd = d; bi = i; } }
+    return bi;
+  };
+  svg.addEventListener('pointermove', ev => show(nearest(ev)));
+  svg.addEventListener('pointerdown', ev => show(nearest(ev)));
+  svg.addEventListener('pointerleave', () => { if (document.activeElement !== svg) show(-1); });
+  svg.addEventListener('focus', () => { if (cur < 0) show(lastI); });
+  svg.addEventListener('blur', () => show(-1));
+  svg.addEventListener('keydown', ev => {
+    if (ev.key === 'ArrowLeft') { show(Math.max(0, (cur < 0 ? lastI : cur) - 1)); ev.preventDefault(); }
+    else if (ev.key === 'ArrowRight') { show(Math.min(lastI, (cur < 0 ? 0 : cur) + 1)); ev.preventDefault(); }
+  });
+  host.appendChild(box);
+}
+
+
+
+/* =====================================================================
+   화면 3부: 단계 이동, 단계별 숫자와 글, 시작
+   ===================================================================== */
+let scenes = null, scene = null, expEntered = false;
+
+function buildScenes() {
+  const crowdCtl = n => {
+    const host = $('ctrl' + n), again = () => { if (scene) scene.rebuild(); };
+    host.appendChild(seg('units', 'units' + n, '유닛 수', UNIT_LEVELS.map(v => ({ value: v, label: fmt(v) })), again));
+    const pair = hEl('div', 'ctrl__pair');
+    pair.appendChild(switchCtl('collide', 'col' + n, '유닛끼리 충돌', again));
+    pair.appendChild(seg('speed', 'speed' + n, '이동 속도', [1, 2, 4].map(v => ({ value: v, label: v + '×' })), () => {}));
+    host.appendChild(pair);
+  };
+  crowdCtl(2); crowdCtl(4); crowdCtl(5);
+
+  scenes = {
+    1: soloScene(1, 'astar', {
+      data: getOne, seconds: 2.6, showPath: true, arrows: false,
+      read: (R, p) => {
+        const D = R.data, live = R.phase !== 'ready';
+        setDD('cells1', live ? fmt(p.shown) : '–', live ? '칸' : '');
+        setDD('len1', p.revealed ? fmtDist(D.len10) : '–', p.revealed ? '칸' : '');
+        $('res1').textContent = p.revealed ? '빈칸 ' + fmt(field.count) + '칸 가운데 ' + fmt(D.totalA) + '칸만 살펴보고 길을 찾았어요.' : '';
+        if (!live) keyRow('keys1', [['keys__tint', '살펴본 칸'], ['keys__line', '찾은 길'], ['dot dot--astar', '유닛']]);
+      }
+    }),
+    2: soloScene(2, 'astar', {
+      data: getCrowd, seconds: 3.2, showPath: false, arrows: false,
+      read: (R, p) => {
+        const D = R.data, S = p.sim, live = R.phase !== 'ready';
+        setDD('cells2', live ? fmt(p.shown) : '–', live ? '칸' : '');
+        setDD('extra2', p.departed ? fmt(S.extra) : '–', p.departed ? '칸' : '');
+        setDD('max2', p.revealed ? fmt(D.heatMax) : '–', p.revealed ? '번' : '');
+        setDD('arr2', fmt(S.arrived), '/ ' + fmt(D.N));
+        let msg = '';
+        if (p.revealed) {
+          msg = '유닛 ' + fmt(D.N) + '개가 길을 ' + fmt(D.N) + '번 찾았어요. 유닛 하나에 평균 ' + fmt(D.totalA / D.N) + '칸이에요.';
+          if (S.replans > 0) msg += ' 이동하면서 서로 밀려 길을 ' + fmt(S.replans) + '번 다시 찾았어요.';
+        }
+        $('res2').textContent = msg;
+        if (!live) keyRow('keys2', [['keys__ramp', '칸마다 살펴본 횟수 1번 → ' + fmt(Math.max(D.heatMax, 10)) + '번'], ['dot dot--astar', 'A* 유닛']]);
+      }
+    }),
+    3: fieldScene(),
+    4: soloScene(4, 'flow', {
+      data: getCrowd, seconds: 2.2, showPath: false, arrows: true,
+      read: (R, p) => {
+        const D = R.data, S = p.sim, live = R.phase !== 'ready';
+        setDD('cells4', live ? fmt(p.shown) : '–', live ? '칸' : '');
+        setDD('extra4', p.departed ? '0' : '–', p.departed ? '칸' : '');
+        setDD('max4', p.revealed ? '1' : '–', p.revealed ? '번' : '');
+        setDD('arr4', fmt(S.arrived), '/ ' + fmt(D.N));
+        $('say4').textContent = '지도가 같으면 유닛이 1개든 1000개든 ' + fmt(field.count) + '칸이에요.';
+        let msg = '';
+        if (p.revealed) {
+          msg = '유닛 ' + fmt(D.N) + '개가 모두 같은 지도 한 장을 써요. 살펴본 칸 ' + fmt(field.count) + '칸은 이 맵의 빈칸 수와 같아요.';
+          if (D.N <= 10) msg += ' 유닛이 적을 때는 손해예요. ' + fmt(D.N) + '개뿐이어도 지도 전체를 살펴봐야 해요.';
+        }
+        $('res4').textContent = msg;
+        if (!live) keyRow('keys4', [['keys__tint keys__tint--pale', '한 번 살펴본 칸'], ['keys__arrow', '그 칸에서 갈 방향', '→'], ['dot dot--flow', '플로우 필드 유닛']]);
+      }
+    }),
+    5: dualScene(),
+    6: {
+      enter() {
+        renderExp();
+        if (!expEntered) {                        // 처음 들어왔을 때 실험 1을 한 번 재 둔다
+          expEntered = true;
+          setTimeout(() => { if (state.step === 6 && !results.units && !busyExp) runExp(0); }, 300);
+        }
+      },
+      leave() {}, rebuild() { renderExp(); }, resize() {}, repaint() {}
+    }
+  };
+}
+
+function buildNav() {
+  const nav = $('stepnav');
+  GROUPS.forEach((g, gi) => {
+    const box = hEl('div', 'stepnav__group stepnav__group--' + g.cls);
+    box.appendChild(hEl('p', 'stepnav__label', g.name));
+    const btns = hEl('div', 'stepnav__btns');
+    STEPS.forEach((s, i) => {
+      if (s.group !== gi) return;
+      const b = hEl('button', 'stepbtn');
+      b.type = 'button'; b.id = 'nav' + (i + 1);
+      b.setAttribute('aria-label', (i + 1) + '단계: ' + s.short);
+      b.appendChild(hEl('b', null, String(i + 1)));
+      b.appendChild(hEl('span', null, s.short));
+      b.addEventListener('click', () => goStep(i + 1));
+      btns.appendChild(b);
+    });
+    box.appendChild(btns);
+    nav.appendChild(box);
+  });
+  $('prev').addEventListener('click', () => goStep(state.step - 1));
+  $('next').addEventListener('click', () => goStep(state.step + 1));
+  const tabs = $('tabs');
+  EXPS.forEach((E, i) => {
+    const b = hEl('button', 'tab', E.tab);
+    b.type = 'button'; b.id = 'tab-' + i; b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(i === state.tab)); b.setAttribute('aria-controls', 'exp');
+    b.addEventListener('click', () => {
+      state.tab = i;
+      tabs.querySelectorAll('.tab').forEach((t, j) => t.setAttribute('aria-selected', String(j === i)));
+      renderExp();
+    });
+    tabs.appendChild(b);
+  });
+}
+
+function goStep(n, quiet) {
+  n = Math.max(1, Math.min(6, n | 0));
+  if (scene) scene.leave();
+  state.step = n;
+  for (let i = 1; i <= 6; i++) {
+    $('step' + i).hidden = i !== n;
+    const b = $('nav' + i);
+    if (i === n) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+  }
+  const pager = (btn, k, back) => {
+    btn.style.visibility = (k >= 1 && k <= 6) ? 'visible' : 'hidden';
+    btn.textContent = '';
+    if (k < 1 || k > 6) return;
+    if (back) btn.appendChild(hEl('span', null, '←'));
+    btn.appendChild(hEl('small', null, k + '단계'));
+    btn.appendChild(hEl('span', null, STEPS[k - 1].short));
+    if (!back) btn.appendChild(hEl('span', null, '→'));
+  };
+  pager($('prev'), n - 1, true); pager($('next'), n + 1, false);
+  scene = scenes[n];
+  scene.enter();
+  if (!quiet) {
+    try { if (location.hash !== '#step-' + n) location.hash = 'step-' + n; } catch (e) { /* 주소를 못 바꾸는 곳에서는 그냥 둔다 */ }
+    window.scrollTo(0, 0);
+  }
+}
+
+function boot(saved) {
+  if (saved && typeof saved === 'object') {
+    if (saved.step >= 1 && saved.step <= 6) state.step = saved.step | 0;
+    if (UNIT_LEVELS.includes(saved.units)) state.units = saved.units;
+    if (saved.collide === 0 || saved.collide === 1) state.collide = saved.collide;
+    if (saved.game === 0 || saved.game === 1) state.game = saved.game;
+    if (saved.seed >= 1 && saved.seed <= 9999) state.seed = saved.seed | 0;
+    if ([1, 2, 4].includes(saved.speed)) state.speed = saved.speed;
+    if ([0, 1, 2].includes(saved.pace)) state.pace = saved.pace;
+    if (saved.tab >= 0 && saved.tab < EXPS.length) state.tab = saved.tab | 0;
+  }
+  const m = /^#step-([1-6])$/.exec(location.hash || '');
+  if (m) state.step = Number(m[1]);
+
+  readTheme();
+  document.documentElement.classList.toggle('is-game', !!state.game);
+  loadWorld();
+  buildNav();
+  buildScenes();
+
+  const gs = $('gameSkin');
+  gs.checked = !!state.game;
+  gs.addEventListener('change', () => {
+    state.game = gs.checked ? 1 : 0;
+    document.documentElement.classList.toggle('is-game', !!state.game);
+    if (scene) scene.repaint();
+  });
+  const seed = $('seed');
+  seed.value = state.seed;
+  const applySeed = () => {
+    let v = Math.round(Number(seed.value));
+    if (!(v >= 1)) v = 1; if (v > 9999) v = 9999;
+    seed.value = v;
+    if (v !== state.seed) { state.seed = v; loadWorld(); if (scene) scene.rebuild(); }
+  };
+  seed.addEventListener('change', applySeed);
+  $('newMap').addEventListener('click', () => { seed.value = (state.seed % 9999) + 1; applySeed(); });
+
+  goStep(state.step, true);
+
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => { if (scene) scene.resize(); }).observe(document.querySelector('.lab'));
+    new ResizeObserver(() => {
+      const w = $('exp').clientWidth;
+      if (state.step !== 6 || !chartHostW || Math.abs(w - chartHostW) < 24 || busyExp || !results[EXPS[state.tab].key]) return;
+      clearTimeout(chartTimer);
+      chartTimer = setTimeout(renderExp, 150);
+    }).observe($('exp'));
+  }
+  window.addEventListener('resize', () => { if (scene) scene.resize(); });
+  window.addEventListener('hashchange', () => {
+    const h = /^#step-([1-6])$/.exec(location.hash || '');
+    if (h && Number(h[1]) !== state.step) goStep(Number(h[1]), true);
+  });
+  const retheme = () => { readTheme(); if (scene) scene.repaint(); };
+  new MutationObserver(retheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style'] });
+  if (window.matchMedia) {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (mq.addEventListener) mq.addEventListener('change', retheme);
+  }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (scene) scene.repaint(); });
+}
+
+const hot = window.claude && window.claude.hot;
+if (hot && hot.snapshot) { try { hot.snapshot(() => Object.assign({}, state)); } catch (e) { /* 미리보기 밖에서는 없음 */ } }
+if (hot && hot.ready) hot.ready(boot); else boot((hot && hot.data) || {});
+
+})();
+</script>
+</body>
+</html>
